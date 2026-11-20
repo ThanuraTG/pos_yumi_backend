@@ -71,24 +71,52 @@ export class SalesController {
   @RequirePermissions('sales.view_all')
   async findSales(
     @Query('page') page = '1',
-    @Query('limit') limit = '20',
+    @Query('limit') limit = '50',
     @Query('cashierId') cashierId?: string,
     @Query('status') status?: SaleStatus,
-    @Query('search') search?: string
+    @Query('search') search?: string,
+    @Query('cashSessionId') cashSessionId?: string,
+    @Query('date') date?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string
   ) {
-    return await this.salesService.findAll(+page, +limit, cashierId, status, search);
+    return await this.salesService.findAll(
+      +page,
+      +limit,
+      cashierId,
+      status,
+      search,
+      cashSessionId,
+      date,
+      startDate,
+      endDate
+    );
   }
 
   @Get('invoices')
   @RequirePermissions('sales.view_all')
   async findAll(
     @Query('page') page = '1',
-    @Query('limit') limit = '20',
+    @Query('limit') limit = '50',
     @Query('cashierId') cashierId?: string,
     @Query('status') status?: SaleStatus,
-    @Query('search') search?: string
+    @Query('search') search?: string,
+    @Query('cashSessionId') cashSessionId?: string,
+    @Query('date') date?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string
   ) {
-    return await this.salesService.findAll(+page, +limit, cashierId, status, search);
+    return await this.salesService.findAll(
+      +page,
+      +limit,
+      cashierId,
+      status,
+      search,
+      cashSessionId,
+      date,
+      startDate,
+      endDate
+    );
   }
 
   @Get(':id')

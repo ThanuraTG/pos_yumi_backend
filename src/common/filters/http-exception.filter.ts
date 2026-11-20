@@ -32,9 +32,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? (message as any).message
         : message;
 
-    this.logger.error(
-      `[${request.method}] ${request.url} - Status: ${status} - Error: ${JSON.stringify(errorMessage)}`
-    );
+    if (status >= 500) {
+      this.logger.error(
+        `[${request.method}] ${request.url} - Status: ${status} - Error: ${JSON.stringify(errorMessage)}`
+      );
+    } else {
+      this.logger.warn(
+        `[${request.method}] ${request.url} - Status: ${status} - Message: ${JSON.stringify(errorMessage)}`
+      );
+    }
 
     response.status(status).json({
       success: false,

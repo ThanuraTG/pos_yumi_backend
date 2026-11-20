@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import * as cookieParser from 'cookie-parser';
 import * as express from 'express';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 
 async function bootstrap() {
   const appName = process.env.APP_NAME || 'PharmaSys';
@@ -21,11 +21,22 @@ async function bootstrap() {
   }));
   app.use(cookieParser());
 
+  // High-capacity payload parser for high-res prescription scans & camera captures
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
   // Global Prefix (exclude root status and docs)
   const apiPrefix = (process.env.API_PREFIX || '/api/v1').replace(/^\//, '');
   app.setGlobalPrefix(apiPrefix, {
     exclude: ['/', 'favicon.ico']
   });
+
+  // Static directory for uploaded prescription scans and documents
+  const uploadsDir = join(process.cwd(), 'uploads');
+  if (!existsSync(uploadsDir)) {
+    mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsDir));
 
   // CORS Configuration
   const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:3000')
@@ -69,7 +80,7 @@ async function bootstrap() {
   if (existsSync(frontendDist)) {
     app.use(express.static(frontendDist));
     app.use((req: any, res: any, next: any) => {
-      if (req.method === 'GET' && !req.path.startsWith(`/${apiPrefix}`) && !req.path.startsWith(`/${swaggerPath}`)) {
+      if (req.method === 'GET' && !req.path.startsWith(`/${apiPrefix}`) && !req.path.startsWith(`/${swaggerPath}`) && !req.path.startsWith('/uploads')) {
         const indexPath = join(frontendDist, 'index.html');
         if (existsSync(indexPath)) {
           return res.sendFile(indexPath);

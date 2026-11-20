@@ -47,7 +47,13 @@ export class TransformInterceptor<T>
     next: CallHandler
   ): Observable<Response<T>> {
     const ctx = context.switchToHttp();
+    const req = ctx.getRequest();
     const response = ctx.getResponse();
+
+    // Bypass standard JSON wrapper for Meta WhatsApp Webhooks so raw challenge string is returned
+    if (req.url && (req.url.includes('webhook') || req.url.includes('/whatsapp/'))) {
+      return next.handle();
+    }
 
     return next.handle().pipe(
       map((data) => ({

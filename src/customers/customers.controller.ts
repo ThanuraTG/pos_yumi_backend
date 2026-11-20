@@ -122,6 +122,8 @@ export class CustomersController {
       address?: string;
       district?: string;
       city?: string;
+      gender?: any;
+      birthday?: string;
       hasWhatsapp?: boolean;
       whatsappNumber?: string;
       whatsappConsent?: boolean;

@@ -1,102 +1,180 @@
 import 'dotenv/config';
-import {
-  PrismaClient,
-  DosageForm,
-  BatchStatus,
-  MovementType,
-  PurchaseStatus,
-  SupplierPayMethod,
-  PrescriptionStatus,
-  SessionStatus,
-  SaleStatus,
-  PaymentMethod,
-  PaymentStatus,
-  RefundMethod,
-  RestockStatus,
-  NotificationChannel,
-  NotificationStatus,
-  Gender,
-  Prisma
-} from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('================================================================');
-  console.log('   PharmaSys ERP & POS - Comprehensive Realistic Mock Seeding   ');
-  console.log('   Location: Colombo, Sri Lanka | Currency: LKR                 ');
-  console.log('================================================================');
+  console.log('   PharmaSys ERP - Production Clean Master Data Seeding         ');
+  console.log('   (Security, Classifications, Units, Manufacturers, Settings)   ');
+  console.log('================================================================\n');
 
   // -------------------------------------------------------------
-  // 1. ROLES & PERMISSIONS
+  // 1. ENTERPRISE SECURITY ROLES & SYSTEM PERMISSIONS MATRIX
   // -------------------------------------------------------------
-  console.log('\n[1/13] Seeding Enterprise Security Roles...');
-  const superAdminRole = await prisma.role.upsert({
-    where: { name: 'SUPER_ADMIN' },
-    update: {},
-    create: {
+  console.log('[1/7] Seeding Enterprise Security Roles & Permissions Matrix...');
+
+  const roles = [
+    {
       name: 'SUPER_ADMIN',
       displayName: 'System Administrator',
       description: 'Unrestricted enterprise administrative access to all modules, logs, and configurations'
-    }
-  });
-
-  const managerRole = await prisma.role.upsert({
-    where: { name: 'PHARMACY_MANAGER' },
-    update: {},
-    create: {
+    },
+    {
       name: 'PHARMACY_MANAGER',
       displayName: 'Pharmacy Manager',
       description: 'Management of procurement, supplier accounts, pricing, cash drawer reconciliation and P&L'
-    }
-  });
-
-  const pharmacistRole = await prisma.role.upsert({
-    where: { name: 'PHARMACIST' },
-    update: {},
-    create: {
+    },
+    {
       name: 'PHARMACIST',
       displayName: 'Responsible Pharmacist (SLMC)',
       description: 'Clinical oversight, prescription verification, controlled drugs and dispensing safety'
-    }
-  });
-
-  const cashierRole = await prisma.role.upsert({
-    where: { name: 'CASHIER' },
-    update: {},
-    create: {
+    },
+    {
       name: 'CASHIER',
       displayName: 'Counter Cashier / POS Operator',
       description: 'Counter retail checkout, barcode scanning, payment collection and receipt printing'
-    }
-  });
-
-  const inventoryOfficerRole = await prisma.role.upsert({
-    where: { name: 'INVENTORY_OFFICER' },
-    update: {},
-    create: {
+    },
+    {
       name: 'INVENTORY_OFFICER',
       displayName: 'Inventory Officer',
       description: 'Goods receiving bay (GRN), lot batch creation, expiry monitoring and stock takes'
     }
-  });
+  ];
+
+  const roleMap: Record<string, bigint> = {};
+  for (const r of roles) {
+    const roleRecord = await prisma.role.upsert({
+      where: { name: r.name },
+      update: { displayName: r.displayName, description: r.description },
+      create: { name: r.name, displayName: r.displayName, description: r.description }
+    });
+    roleMap[r.name] = roleRecord.id;
+  }
+
+  // System Permissions Matrix
+  const permissions = [
+    // Sales & POS
+    { code: 'sales.create', module: 'sales', description: 'Create retail sales invoices and process checkout' },
+    { code: 'sales.refund', module: 'sales', description: 'Process customer product returns and cash refunds' },
+    { code: 'sales.view_all', module: 'sales', description: 'View full history of all store sales transactions' },
+    { code: 'sales.reprint_receipt', module: 'sales', description: 'Reprint duplicate POS customer tax receipts' },
+
+    // Medicines & Master Catalog
+    { code: 'medicines.view', module: 'medicines', description: 'Browse and search medicine catalog' },
+    { code: 'medicines.create', module: 'medicines', description: 'Create new pharmaceutical products and SKUs' },
+    { code: 'medicines.edit', module: 'medicines', description: 'Modify medicine information and classifications' },
+    { code: 'medicines.delete', module: 'medicines', description: 'Archive or remove medicine records' },
+
+    // Batches & Expiry Control
+    { code: 'batches.view', module: 'batches', description: 'View batches, lot numbers, and FEFO expiry timeline' },
+    { code: 'batches.create', module: 'batches', description: 'Manually register a new batch into inventory' },
+    { code: 'batches.quarantine', module: 'batches', description: 'Quarantine, hold, or unhold damaged/recalled batches' },
+
+    // Inventory & Stock Adjustments
+    { code: 'inventory.view_ledger', module: 'inventory', description: 'Inspect stock movement audit ledgers' },
+    { code: 'inventory.adjust', module: 'inventory', description: 'Submit inventory stock-take adjustment requests' },
+    { code: 'inventory.approve_adjustment', module: 'inventory', description: 'Approve or reject stock write-offs' },
+
+    // Procurement & GRN
+    { code: 'purchases.view', module: 'purchases', description: 'View purchase orders and goods receipt notes' },
+    { code: 'purchases.order_create', module: 'purchases', description: 'Generate purchase orders to pharmaceutical suppliers' },
+    { code: 'purchases.receive_grn', module: 'purchases', description: 'Receive supplier shipments into inventory via GRN' },
+
+    // Cash Register & Shift Sessions
+    { code: 'cash_register.open_close', module: 'cash_sessions', description: 'Open, close, and balance cashier drawer shifts' },
+    { code: 'cash_register.record_drop', module: 'cash_sessions', description: 'Record cash drops or petty cash expenses' },
+
+    // Customers & Patient Records
+    { code: 'customers.view', module: 'customers', description: 'Search and view customer records and accounts' },
+    { code: 'customers.manage', module: 'customers', description: 'Create, update customer contact and credit settings' },
+
+    // Prescriptions & Clinical Oversight
+    { code: 'prescriptions.view', module: 'prescriptions', description: 'Inspect doctor prescriptions and refills' },
+    { code: 'prescriptions.verify', module: 'prescriptions', description: 'Pharmacist verification of dosage and contraindications' },
+    { code: 'prescriptions.dispense', module: 'prescriptions', description: 'Mark prescription refills as dispensed' },
+
+    // Reports & Financial Analytics
+    { code: 'reports.view_sales', module: 'reports', description: 'Access daily and periodic sales performance reports' },
+    { code: 'reports.view_profit', module: 'reports', description: 'View profit margin analysis by item and category' },
+    { code: 'reports.view_pnl', module: 'reports', description: 'Inspect comprehensive profit & loss financial statement' },
+    { code: 'reports.view_inventory', module: 'reports', description: 'Analyze stock valuation, aging, and slow-movers' },
+
+    // Settings, Security & Staff
+    { code: 'settings.manage', module: 'settings', description: 'Configure store parameters, tax rates, and peripherals' },
+    { code: 'users.manage', module: 'users', description: 'Manage employee accounts, passwords, and role privileges' },
+    { code: 'suppliers.view', module: 'suppliers', description: 'View pharmaceutical suppliers and ledgers' },
+    { code: 'suppliers.manage', module: 'suppliers', description: 'Manage supplier credit limits and agreements' }
+  ];
+
+  const permMap: Record<string, bigint> = {};
+  for (const p of permissions) {
+    const permRecord = await prisma.permission.upsert({
+      where: { code: p.code },
+      update: { description: p.description, module: p.module },
+      create: { code: p.code, module: p.module, description: p.description }
+    });
+    permMap[p.code] = permRecord.id;
+  }
+
+  // Assign standard permissions to roles
+  const managerPermissions = permissions.map((p) => p.code).filter((c) => c !== 'users.manage');
+  const pharmacistPermissions = [
+    'medicines.view', 'medicines.create', 'medicines.edit',
+    'batches.view', 'batches.quarantine', 'inventory.view_ledger',
+    'prescriptions.view', 'prescriptions.verify', 'prescriptions.dispense',
+    'sales.create', 'sales.view_all', 'customers.view', 'customers.manage',
+    'reports.view_inventory', 'reports.view_sales'
+  ];
+  const cashierPermissions = [
+    'sales.create', 'sales.refund', 'sales.view_all', 'sales.reprint_receipt',
+    'cash_register.open_close', 'cash_register.record_drop',
+    'medicines.view', 'batches.view', 'customers.view', 'customers.manage',
+    'prescriptions.view', 'prescriptions.dispense'
+  ];
+  const inventoryOfficerPermissions = [
+    'medicines.view', 'medicines.create', 'medicines.edit',
+    'batches.view', 'batches.create', 'batches.quarantine',
+    'inventory.view_ledger', 'inventory.adjust',
+    'purchases.view', 'purchases.order_create', 'purchases.receive_grn',
+    'suppliers.view', 'reports.view_inventory'
+  ];
+
+  const linkRolePermissions = async (roleName: string, codes: string[]) => {
+    const rId = roleMap[roleName];
+    if (!rId) return;
+    for (const code of codes) {
+      const pId = permMap[code];
+      if (pId) {
+        await prisma.rolePermission.upsert({
+          where: { roleId_permissionId: { roleId: rId, permissionId: pId } },
+          update: {},
+          create: { roleId: rId, permissionId: pId }
+        });
+      }
+    }
+  };
+
+  await linkRolePermissions('SUPER_ADMIN', permissions.map((p) => p.code));
+  await linkRolePermissions('PHARMACY_MANAGER', managerPermissions);
+  await linkRolePermissions('PHARMACIST', pharmacistPermissions);
+  await linkRolePermissions('CASHIER', cashierPermissions);
+  await linkRolePermissions('INVENTORY_OFFICER', inventoryOfficerPermissions);
+
+  console.log('   -> Enterprise roles & permissions matrix successfully seeded.');
 
   // -------------------------------------------------------------
-  // 2. STAFF USERS
+  // 2. PRODUCTION SYSTEM ADMINISTRATOR
   // -------------------------------------------------------------
-  console.log('\n[2/13] Seeding Staff Users with Argon2id Passwords...');
+  console.log('\n[2/7] Seeding Default System Administrator Account...');
   const defaultAdminPass = await argon2.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'Admin@123456');
-  const defaultCashierPass = await argon2.hash('Cashier@123456');
-  const defaultPharmPass = await argon2.hash('Pharm@123456');
-  const defaultManagerPass = await argon2.hash('Manager@123456');
-
   const adminUsername = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
   const adminEmail = process.env.DEFAULT_ADMIN_EMAIL || 'admin@pharmasys.lk';
 
   const adminUser = await prisma.user.upsert({
     where: { username: adminUsername },
-    update: { passwordHash: defaultAdminPass },
+    update: { email: adminEmail },
     create: {
       username: adminUsername,
       email: adminEmail,
@@ -104,84 +182,355 @@ async function main() {
       fullName: 'System Administrator',
       phone: '+94771234567',
       isActive: true,
-      roles: { create: { roleId: superAdminRole.id } }
+      roles: { create: { roleId: roleMap['SUPER_ADMIN'] } }
     }
   });
 
-  const managerUser = await prisma.user.upsert({
-    where: { username: 'manager' },
-    update: { passwordHash: defaultManagerPass },
-    create: {
-      username: 'manager',
-      email: 'manager@pharmasys.lk',
-      passwordHash: defaultManagerPass,
-      fullName: 'Kamal Gunaratne (Pharmacy Manager)',
-      phone: '+94773344556',
-      isActive: true,
-      roles: { create: { roleId: managerRole.id } }
-    }
+  // Ensure admin user has SUPER_ADMIN role
+  const existingUserRole = await prisma.userRole.findFirst({
+    where: { userId: adminUser.id, roleId: roleMap['SUPER_ADMIN'] }
   });
-
-  const cashierUser = await prisma.user.upsert({
-    where: { username: 'cashier' },
-    update: { passwordHash: defaultCashierPass },
-    create: {
-      username: 'cashier',
-      email: 'cashier@pharmasys.lk',
-      passwordHash: defaultCashierPass,
-      fullName: 'Nimali Fernando (Cashier 01)',
-      phone: '+94772345678',
-      isActive: true,
-      roles: { create: { roleId: cashierRole.id } }
-    }
-  });
-
-  const pharmacistUser = await prisma.user.upsert({
-    where: { username: 'pharmacist' },
-    update: { passwordHash: defaultPharmPass },
-    create: {
-      username: 'pharmacist',
-      email: 'pharmacist@pharmasys.lk',
-      passwordHash: defaultPharmPass,
-      fullName: 'Dr. Ruwan Pathirana (SLMC 12450)',
-      phone: '+94779876543',
-      isActive: true,
-      roles: { create: { roleId: pharmacistRole.id } }
-    }
-  });
-
-  console.log('   -> Users created: admin, manager, cashier, pharmacist');
+  if (!existingUserRole) {
+    await prisma.userRole.create({
+      data: { userId: adminUser.id, roleId: roleMap['SUPER_ADMIN'] }
+    });
+  }
+  console.log(`   -> System Admin initialized: ${adminUsername} (${adminEmail})`);
 
   // -------------------------------------------------------------
-  // 3. CATEGORIES
+  // 3. MEDICINE CLASSIFICATION & UNIT MANAGEMENT
   // -------------------------------------------------------------
-  console.log('\n[3/13] Seeding Medicine Therapeutic Categories...');
-  const categoryData = [
-    { name: 'Antibiotics & Anti-Infectives', code: 'ANTIBIOTICS', description: 'Oral and injectable antibacterial formulations' },
-    { name: 'Analgesics & Antipyretics', code: 'ANALGESICS', description: 'Pain relievers and fever reducers' },
-    { name: 'Cardiovascular & Antihypertensives', code: 'CARDIO', description: 'Blood pressure, cardiac, and statin medications' },
+  console.log('\n[3/7] Seeding Medicine Classification & Unit Management (37+ Categories, Forms, Units)...');
+
+  // 3.1 Therapeutic Categories (37+ Clinical Categories)
+  const categories = [
+    { name: 'Analgesics', code: 'ANALGESICS', description: 'Pain management drugs and fever reducers' },
+    { name: 'Anthelmintics', code: 'ANTHELMINTICS', description: 'Deworming treatments for roundworms, tapeworms, etc.' },
+    { name: 'Anti-inflammatory', code: 'ANTI_INFLAMMATORY', description: 'Steroidal and non-steroidal anti-inflammatory agents' },
+    { name: 'Antibiotics', code: 'ANTIBIOTICS', description: 'Anti-infective agents that kill or inhibit bacteria' },
     { name: 'Antidiabetic Agents', code: 'ANTIDIABETIC', description: 'Insulins and oral hypoglycemic agents' },
-    { name: 'Gastrointestinal & Antacids', code: 'GASTRO', description: 'Proton pump inhibitors, H2 blockers, and antacids' },
-    { name: 'Respiratory & Antihistamines', code: 'RESPIRATORY', description: 'Asthma inhalers, cough syrups, and anti-allergics' },
-    { name: 'Vitamins & Nutritional Supplements', code: 'SUPPLEMENTS', description: 'Multivitamins, minerals, and tonics' },
-    { name: 'Dermatology & Topical Preparations', code: 'DERMA', description: 'Antifungal, steroid, and antibiotic creams' },
-    { name: 'Controlled & Narcotic Substances', code: 'NARCOTICS', description: 'Schedule II & III controlled analgesics' }
+    { name: 'Cardiovascular', code: 'CARDIOVASCULAR', description: 'Medications for heart conditions, arrhythmias, and circulation' },
+    { name: 'Antihypertensives', code: 'ANTIHYPERTENSIVES', description: 'Blood pressure regulation drugs' },
+    { name: 'Respiratory', code: 'RESPIRATORY', description: 'Inhalers, bronchodilators, cough and cold preparations' },
+    { name: 'Antihistamines', code: 'ANTIHISTAMINES', description: 'Allergy and anaphylaxis relief medications' },
+    { name: 'Gastrointestinal', code: 'GASTROINTESTINAL', description: 'PPIs, antacids, laxatives, and antispasmodics' },
+    { name: 'Vitamins & Minerals', code: 'VITAMINS_MINERALS', description: 'Essential supplements, multivitamins, and dietary nutrients' },
+    { name: 'Dermatology', code: 'DERMATOLOGY', description: 'Topical ointments, eczema and skin therapeutics' },
+    { name: 'Neurology', code: 'NEUROLOGY', description: 'CNS stimulants, neuropathic pain, migraine and Parkinson’s therapy' },
+    { name: 'Antifungals', code: 'ANTIFUNGALS', description: 'Oral and topical treatments for fungal infections' },
+    { name: 'Antivirals', code: 'ANTIVIRALS', description: 'Medications targeting viral infections' },
+    { name: 'Antiparasitics', code: 'ANTIPARASITICS', description: 'Agents combating parasitic infestations' },
+    { name: 'Antiseptics & Disinfectants', code: 'ANTISEPTICS_DISINFECTANTS', description: 'Surface, skin, and wound cleaning sanitizers' },
+    { name: 'Ophthalmology', code: 'OPHTHALMOLOGY', description: 'Eye drops, ointments, and glaucoma treatments' },
+    { name: 'ENT Medicines', code: 'ENT_MEDICINES', description: 'Ear, nose, and throat specific medications' },
+    { name: 'Urology', code: 'UROLOGY', description: 'Urinary tract, prostate, and kidney stone management' },
+    { name: 'Gynecology', code: 'GYNECOLOGY', description: 'Women’s reproductive health and contraceptive therapies' },
+    { name: 'Hormonal Medicines', code: 'HORMONAL', description: 'Thyroid, corticosteroid, and metabolic hormone treatments' },
+    { name: 'Psychiatric Medicines', code: 'PSYCHIATRIC', description: 'Antidepressants, anxiolytics, and mood stabilizers' },
+    { name: 'Antiepileptics', code: 'ANTIEPILEPTICS', description: 'Seizure control and anticonvulsant drugs' },
+    { name: 'Bone & Joint Health', code: 'BONE_JOINT_HEALTH', description: 'Osteoporosis, calcium, and arthritis therapeutics' },
+    { name: 'Blood Related Medicines', code: 'BLOOD_RELATED', description: 'Anticoagulants, antiplatelets, and hematinics' },
+    { name: 'Immunological Medicines', code: 'IMMUNOLOGICAL', description: 'Vaccines, serums, and immunosuppressants' },
+    { name: 'Oncology', code: 'ONCOLOGY', description: 'Chemotherapy and adjuvant cancer care drugs' },
+    { name: 'Emergency Medicines', code: 'EMERGENCY', description: 'Critical care, anaphylaxis kits, and resuscitation essentials' },
+    { name: 'Sedatives & Hypnotics', code: 'SEDATIVES', description: 'Sleep management, anxiolytics, and tranquilizers' },
+    { name: 'Controlled & Narcotic Substances', code: 'NARCOTICS', description: 'Schedule II & III controlled analgesics' },
+    { name: 'Anesthetics', code: 'ANESTHETICS', description: 'Local and general anesthetic medications' },
+    { name: 'Antidotes & Toxicology', code: 'ANTIDOTES', description: 'Reversal agents, chelators, and poison antidotes' },
+    { name: 'Dental & Oral Care', code: 'DENTAL', description: 'Oral pastes, dental analgesics, and periodontal washes' },
+    { name: 'Pediatric Formulations', code: 'PEDIATRIC', description: 'Pediatric drops, suspensions, and flavored liquid formulations' },
+    { name: 'Geriatric & Palliative Care', code: 'GERIATRIC', description: 'Specialized supportive medications for elderly care' },
+    { name: 'Medical Devices & Surgical Consumables', code: 'SURGICAL_DEVICES', description: 'Cannulas, syringes, infusion sets, and surgical disposables' },
+    { name: 'Diagnostic Reagents & Test Strips', code: 'DIAGNOSTICS', description: 'Blood glucose test strips, pregnancy cassettes, and urinalysis' },
+    { name: 'Wound Care & Dressings', code: 'WOUND_CARE', description: 'Bandages, surgical gauze, sterile cotton, and medical adhesive tape' },
+    { name: 'Other Medicines', code: 'OTHER', description: 'General therapeutic and specialized medicines' }
   ];
 
   const catMap: Record<string, bigint> = {};
-  for (const cat of categoryData) {
+  for (const c of categories) {
     const record = await prisma.category.upsert({
-      where: { code: cat.code },
-      update: { name: cat.name, description: cat.description },
-      create: { name: cat.name, code: cat.code, description: cat.description, isActive: true }
+      where: { code: c.code },
+      update: { name: c.name, description: c.description },
+      create: { name: c.name, code: c.code, description: c.description, isActive: true }
     });
-    catMap[cat.code] = record.id;
+    catMap[c.code] = record.id;
   }
 
+  // 3.2 Hierarchical Subcategories
+  const subcategoryData: { catCode: string; name: string; code: string; desc?: string }[] = [
+    // Analgesics (4 subcategories)
+    { catCode: 'ANALGESICS', name: 'Paracetamol Formulations', code: 'ANALGESICS_PCM', desc: 'Oral tablets, infusions, and pediatric suspensions' },
+    { catCode: 'ANALGESICS', name: 'NSAIDs', code: 'ANALGESICS_NSAID', desc: 'Ibuprofen, Diclofenac, Mefenamic Acid, Meloxicam' },
+    { catCode: 'ANALGESICS', name: 'Opioid Analgesics', code: 'ANALGESICS_OPIOID', desc: 'Tramadol, Codeine, Morphine' },
+    { catCode: 'ANALGESICS', name: 'Combination Analgesics', code: 'ANALGESICS_COMBO', desc: 'Paracetamol + Caffeine / Tramadol' },
+
+    // Anthelmintics
+    { catCode: 'ANTHELMINTICS', name: 'Benzimidazoles', code: 'ANTHELM_BENZ', desc: 'Mebendazole, Albendazole' },
+    { catCode: 'ANTHELMINTICS', name: 'Other Deworming Agents', code: 'ANTHELM_OTHER', desc: 'Pyrantel pamoate, Ivermectin' },
+
+    // Anti-inflammatory (2 subcategories)
+    { catCode: 'ANTI_INFLAMMATORY', name: 'Corticosteroids', code: 'ANTI_INFLAM_STEROID', desc: 'Prednisolone, Dexamethasone, Hydrocortisone' },
+    { catCode: 'ANTI_INFLAMMATORY', name: 'DMARDs', code: 'ANTI_INFLAM_DMARD', desc: 'Methotrexate, Hydroxychloroquine, Sulfasalazine' },
+
+    // Antibiotics (7 subcategories)
+    { catCode: 'ANTIBIOTICS', name: 'Penicillins', code: 'ANTIBIOTICS_PEN', desc: 'Amoxicillin, Ampicillin, Co-Amoxiclav' },
+    { catCode: 'ANTIBIOTICS', name: 'Cephalosporins', code: 'ANTIBIOTICS_CEPH', desc: 'Cephalexin, Cefuroxime, Cefixime' },
+    { catCode: 'ANTIBIOTICS', name: 'Macrolides', code: 'ANTIBIOTICS_MACRO', desc: 'Azithromycin, Clarithromycin, Erythromycin' },
+    { catCode: 'ANTIBIOTICS', name: 'Tetracyclines', code: 'ANTIBIOTICS_TETRA', desc: 'Doxycycline, Minocycline' },
+    { catCode: 'ANTIBIOTICS', name: 'Fluoroquinolones', code: 'ANTIBIOTICS_QUIN', desc: 'Ciprofloxacin, Levofloxacin' },
+    { catCode: 'ANTIBIOTICS', name: 'Aminoglycosides', code: 'ANTIBIOTICS_AMINO', desc: 'Gentamicin, Amikacin' },
+    { catCode: 'ANTIBIOTICS', name: 'Carbapenems', code: 'ANTIBIOTICS_CARBA', desc: 'Meropenem, Imipenem' },
+
+    // Antidiabetic Agents
+    { catCode: 'ANTIDIABETIC', name: 'Biguanides', code: 'DIAB_BIGUANIDE', desc: 'Metformin Hydrochloride (Standard & Prolonged Release)' },
+    { catCode: 'ANTIDIABETIC', name: 'Sulfonylureas', code: 'DIAB_SULFONYL', desc: 'Gliclazide, Glimepiride, Glibenclamide' },
+    { catCode: 'ANTIDIABETIC', name: 'DPP-4 Inhibitors', code: 'DIAB_DPP4', desc: 'Sitagliptin, Vildagliptin, Linagliptin' },
+    { catCode: 'ANTIDIABETIC', name: 'SGLT2 Inhibitors', code: 'DIAB_SGLT2', desc: 'Empagliflozin, Dapagliflozin' },
+    { catCode: 'ANTIDIABETIC', name: 'Insulins', code: 'DIAB_INSULIN', desc: 'Human Actrapid, Mixtard, Glargine, Degludec' },
+
+    // Cardiovascular
+    { catCode: 'CARDIOVASCULAR', name: 'Statins & Lipid Lowering', code: 'CARDIO_STATIN', desc: 'Atorvastatin, Rosuvastatin, Fenofibrate' },
+    { catCode: 'CARDIOVASCULAR', name: 'Antiarrhythmics', code: 'CARDIO_ARRHYTH', desc: 'Amiodarone, Digoxin, Flecainide' },
+    { catCode: 'CARDIOVASCULAR', name: 'Nitrates & Vasodilators', code: 'CARDIO_VASODIL', desc: 'Glyceryl Trinitrate (GTN), Isosorbide Mononitrate' },
+
+    // Antihypertensives
+    { catCode: 'ANTIHYPERTENSIVES', name: 'ACE Inhibitors', code: 'HT_ACE', desc: 'Enalapril, Ramipril, Lisinopril' },
+    { catCode: 'ANTIHYPERTENSIVES', name: 'Angiotensin Receptor Blockers (ARBs)', code: 'HT_ARB', desc: 'Losartan, Telmisartan, Valsartan' },
+    { catCode: 'ANTIHYPERTENSIVES', name: 'Beta Blockers', code: 'HT_BETA', desc: 'Atenolol, Bisoprolol, Carvedilol' },
+    { catCode: 'ANTIHYPERTENSIVES', name: 'Calcium Channel Blockers (CCBs)', code: 'HT_CCB', desc: 'Amlodipine, Diltiazem, Verapamil' },
+    { catCode: 'ANTIHYPERTENSIVES', name: 'Diuretics', code: 'HT_DIURETIC', desc: 'Furosemide, Spironolactone, Hydrochlorothiazide' },
+
+    // Respiratory
+    { catCode: 'RESPIRATORY', name: 'Bronchodilators & Beta-2 Agonists', code: 'RESP_BRONCHO', desc: 'Salbutamol, Formoterol, Salmeterol' },
+    { catCode: 'RESPIRATORY', name: 'Inhaled Corticosteroids (ICS)', code: 'RESP_ICS', desc: 'Budesonide, Fluticasone, Beclomethasone' },
+    { catCode: 'RESPIRATORY', name: 'Cough Syrups & Antitussives', code: 'RESP_COUGH', desc: 'Dextromethorphan, Guaifenesin' },
+    { catCode: 'RESPIRATORY', name: 'Mucolytics', code: 'RESP_MUCO', desc: 'Ambroxol, Bromhexine, Acetylcysteine' },
+
+    // Antihistamines
+    { catCode: 'ANTIHISTAMINES', name: 'First-Generation Antihistamines', code: 'HIST_1ST', desc: 'Chlorpheniramine, Hydroxyzine, Promethazine' },
+    { catCode: 'ANTIHISTAMINES', name: 'Second-Generation Antihistamines', code: 'HIST_2ND', desc: 'Cetirizine, Loratadine, Fexofenadine, Levocetirizine' },
+
+    // Gastrointestinal
+    { catCode: 'GASTROINTESTINAL', name: 'Proton Pump Inhibitors (PPIs)', code: 'GI_PPI', desc: 'Omeprazole, Pantoprazole, Esomeprazole, Rabeprazole' },
+    { catCode: 'GASTROINTESTINAL', name: 'Antacids & Antiflatulents', code: 'GI_ANTACID', desc: 'Magaldrate, Simethicone, Aluminum Hydroxide' },
+    { catCode: 'GASTROINTESTINAL', name: 'Antiemetics & Prokinetics', code: 'GI_ANTIEMETIC', desc: 'Domperidone, Ondansetron, Metoclopramide' },
+    { catCode: 'GASTROINTESTINAL', name: 'Laxatives & Stool Softeners', code: 'GI_LAXATIVE', desc: 'Bisacodyl, Lactulose, Ispaghula Husk' },
+
+    // Dermatology
+    { catCode: 'DERMATOLOGY', name: 'Topical Antifungals', code: 'DERMA_FUNGAL', desc: 'Clotrimazole, Terbinafine, Miconazole creams' },
+    { catCode: 'DERMATOLOGY', name: 'Topical Corticosteroids', code: 'DERMA_STEROID', desc: 'Hydrocortisone, Betamethasone, Clobetasol' },
+    { catCode: 'DERMATOLOGY', name: 'Topical Antibacterials', code: 'DERMA_ANTIBACT', desc: 'Mupirocin, Fusidic Acid, Silver Sulfadiazine' },
+    { catCode: 'DERMATOLOGY', name: 'Emollients & Barrier Ointments', code: 'DERMA_EMOLLIENT', desc: 'Aqueous cream, Liquid paraffin, Zinc castor oil' },
+
+    // Ophthalmology
+    { catCode: 'OPHTHALMOLOGY', name: 'Antibacterial Eye Drops', code: 'OPHTH_ANTIBACT', desc: 'Chloramphenicol, Ciprofloxacin, Tobramycin' },
+    { catCode: 'OPHTHALMOLOGY', name: 'Artificial Tears & Lubricants', code: 'OPHTH_LUBRICANT', desc: 'Carboxymethylcellulose, Hydroxypropyl Methylcellulose' },
+    { catCode: 'OPHTHALMOLOGY', name: 'Glaucoma Therapeutics', code: 'OPHTH_GLAUCOMA', desc: 'Timolol, Latanoprost, Dorzolamide' }
+  ];
+
+  for (const s of subcategoryData) {
+    const parentId = catMap[s.catCode];
+    if (parentId) {
+      await prisma.subCategory.upsert({
+        where: {
+          categoryId_code: {
+            categoryId: parentId,
+            code: s.code
+          }
+        },
+        update: { name: s.name, description: s.desc },
+        create: {
+          categoryId: parentId,
+          name: s.name,
+          code: s.code,
+          description: s.desc,
+          isActive: true
+        }
+      });
+    }
+  }
+
+  // 3.3 Clinical Dosage Forms (Grouped into 8 clinical categories)
+  const dosageForms: { group: string; names: string[] }[] = [
+    {
+      group: 'Solid Forms',
+      names: [
+        'Tablets', 'Capsules', 'Effervescent Tablets', 'Chewable Tablets',
+        'Sublingual Tablets', 'Dispersible Tablets', 'Orodispersible Tablets',
+        'Caplets', 'Modified Release Tablets', 'Enteric Coated Tablets',
+        'Powders', 'Granules', 'Pellets', 'Lozenges', 'Pastilles'
+      ]
+    },
+    {
+      group: 'Liquid Forms',
+      names: [
+        'Syrups', 'Suspensions', 'Solutions', 'Oral Drops', 'Emulsions',
+        'Elixirs', 'Tinctures', 'Mouthwashes', 'Gargles', 'Oral Liquids',
+        'Mixtures', 'Linctuses'
+      ]
+    },
+    {
+      group: 'Topical Forms',
+      names: [
+        'Creams', 'Ointments', 'Gels', 'Lotions', 'Topical Solutions',
+        'Topical Sprays', 'Dusting Powders', 'Transdermal Patches',
+        'Liniments', 'Pastes', 'Topical Foams', 'Collodions'
+      ]
+    },
+    {
+      group: 'Inhalation Forms',
+      names: [
+        'Inhalers', 'Metered Dose Inhalers (MDI)', 'Dry Powder Inhalers (DPI)',
+        'Nebulizer Solutions', 'Inhalation Aerosols', 'Inhalation Powders',
+        'Nasal Sprays', 'Nasal Drops', 'Nasal Solutions', 'Breath-Actuated Inhalers'
+      ]
+    },
+    {
+      group: 'Injectable Forms',
+      names: [
+        'Injections', 'Injectable Solutions', 'Injectable Suspensions',
+        'Injectable Emulsions', 'Powder for Injection', 'Lyophilized Powder for Injection',
+        'Prefilled Syringes', 'Injection Cartridges', 'Infusion Solutions',
+        'Concentrates for Infusion', 'Intravenous Infusions'
+      ]
+    },
+    {
+      group: 'Ophthalmic & Otic Forms',
+      names: [
+        'Eye Drops', 'Eye Ointments', 'Eye Gels', 'Eye Solutions',
+        'Eye Suspensions', 'Ear Drops', 'Ear Solutions', 'Ear Sprays',
+        'Eye Washes'
+      ]
+    },
+    {
+      group: 'Rectal & Vaginal Forms',
+      names: [
+        'Suppositories', 'Rectal Creams', 'Rectal Ointments', 'Rectal Solutions',
+        'Enemas', 'Vaginal Tablets', 'Vaginal Pessaries', 'Vaginal Creams',
+        'Vaginal Gels', 'Vaginal Capsules', 'Vaginal Suppositories', 'Vaginal Rings'
+      ]
+    },
+    {
+      group: 'Other & Diagnostic Forms',
+      names: [
+        'Medicated Films', 'Oral Films', 'Sublingual Films', 'Oral Strips',
+        'Medicated Shampoos', 'Medicated Soaps', 'Medicated Wipes',
+        'Dental Gels', 'Dental Pastes', 'Oral Sprays', 'Test Strips',
+        'Surgical Dressings', 'Subcutaneous Implants'
+      ]
+    }
+  ];
+
+  for (const dfg of dosageForms) {
+    for (const dfName of dfg.names) {
+      await prisma.dosageFormMaster.upsert({
+        where: { name: dfName },
+        update: { categoryGroup: dfg.group },
+        create: {
+          name: dfName,
+          categoryGroup: dfg.group,
+          isActive: true
+        }
+      });
+    }
+  }
+
+  // 3.4 Selling Units (34 units)
+  const sellingUnits: { name: string; abbr: string; type: string; decimals: boolean; desc?: string }[] = [
+    { name: 'Tablet', abbr: 'tab', type: 'COUNT', decimals: false, desc: 'Single oral solid tablet' },
+    { name: 'Capsule', abbr: 'cap', type: 'COUNT', decimals: false, desc: 'Single gelatin or plant capsule' },
+    { name: 'Pill', abbr: 'pill', type: 'COUNT', decimals: false, desc: 'Single medicinal pill' },
+    { name: 'Strip', abbr: 'strip', type: 'PACKAGING', decimals: false, desc: 'Foil or blister medicine strip' },
+    { name: 'Blister', abbr: 'blister', type: 'PACKAGING', decimals: false, desc: 'Blister packaging card' },
+    { name: 'Sachet', abbr: 'sachet', type: 'COUNT', decimals: false, desc: 'Single oral powder or oral solution packet' },
+    { name: 'Bottle', abbr: 'btl', type: 'PACKAGING', decimals: false, desc: 'Glass or plastic liquid medicine bottle' },
+    { name: 'Vial', abbr: 'vial', type: 'PACKAGING', decimals: false, desc: 'Sterile injection or solution vial' },
+    { name: 'Ampoule', abbr: 'amp', type: 'PACKAGING', decimals: false, desc: 'Single-use glass injection ampoule' },
+    { name: 'Tube', abbr: 'tube', type: 'PACKAGING', decimals: false, desc: 'Ointment, gel, or topical cream tube' },
+    { name: 'Pack', abbr: 'pack', type: 'PACKAGING', decimals: false, desc: 'Pre-assembled consumer retail pack' },
+    { name: 'Box', abbr: 'box', type: 'PACKAGING', decimals: false, desc: 'Small retail unit box' },
+    { name: 'Inhaler', abbr: 'inh', type: 'COUNT', decimals: false, desc: 'Metered dose inhaler canister device' },
+    { name: 'Piece', abbr: 'pc', type: 'COUNT', decimals: false, desc: 'Individual discrete physical piece' },
+    { name: 'Unit', abbr: 'unit', type: 'COUNT', decimals: false, desc: 'Standard clinical dosage unit' },
+    { name: 'Drop', abbr: 'drop', type: 'COUNT', decimals: false, desc: 'Single ophthalmic or otic drop' },
+    { name: 'Millilitre (ml)', abbr: 'ml', type: 'VOLUME', decimals: true, desc: 'Liquid volume measure in millilitres' },
+    { name: 'Litre (L)', abbr: 'L', type: 'VOLUME', decimals: true, desc: 'Bulk liquid measure in litres' },
+    { name: 'Gram (g)', abbr: 'g', type: 'WEIGHT', decimals: true, desc: 'Weight measure in grams' },
+    { name: 'Kilogram (kg)', abbr: 'kg', type: 'WEIGHT', decimals: true, desc: 'Weight measure in kilograms' },
+    { name: 'Microgram (mcg)', abbr: 'mcg', type: 'WEIGHT', decimals: true, desc: 'Microgram potency measure' },
+    { name: 'Milligram (mg)', abbr: 'mg', type: 'WEIGHT', decimals: true, desc: 'Milligram strength measure' },
+    { name: 'Patch', abbr: 'patch', type: 'COUNT', decimals: false, desc: 'Transdermal sustained-release patch' },
+    { name: 'Suppository', abbr: 'supp', type: 'COUNT', decimals: false, desc: 'Single rectal suppository cone' },
+    { name: 'Pessary', abbr: 'pess', type: 'COUNT', decimals: false, desc: 'Single vaginal pessary tablet' },
+    { name: 'Syringe', abbr: 'syr', type: 'COUNT', decimals: false, desc: 'Prefilled graduated injection syringe' },
+    { name: 'Cartridge', abbr: 'cart', type: 'COUNT', decimals: false, desc: 'Dental or insulin pen cartridge' },
+    { name: 'Roll', abbr: 'roll', type: 'COUNT', decimals: false, desc: 'Cotton, bandage, or surgical tape roll' },
+    { name: 'Pair', abbr: 'pair', type: 'COUNT', decimals: false, desc: 'Surgical or examination gloves pair' },
+    { name: 'Set', abbr: 'set', type: 'COUNT', decimals: false, desc: 'Infusion, blood transfusion or dressing set' },
+    { name: 'Kit', abbr: 'kit', type: 'COUNT', decimals: false, desc: 'Diagnostic rapid test kit or first aid kit' },
+    { name: 'Dose', abbr: 'dose', type: 'COUNT', decimals: false, desc: 'Pre-measured clinical dose' },
+    { name: 'Puff', abbr: 'puff', type: 'COUNT', decimals: false, desc: 'Single inhaler spray actuation' },
+    { name: 'Applicator', abbr: 'appl', type: 'COUNT', decimals: false, desc: 'Medicated vaginal or topical applicator' }
+  ];
+
+  for (const su of sellingUnits) {
+    await prisma.sellingUnit.upsert({
+      where: { name: su.name },
+      update: { abbreviation: su.abbr, unitType: su.type, allowDecimals: su.decimals, description: su.desc },
+      create: {
+        name: su.name,
+        abbreviation: su.abbr,
+        unitType: su.type,
+        allowDecimals: su.decimals,
+        description: su.desc,
+        isActive: true
+      }
+    });
+  }
+
+  // 3.5 Purchase Units (18 secondary/tertiary units)
+  const purchaseUnits: { name: string; abbr: string; desc?: string }[] = [
+    { name: 'Box', abbr: 'box', desc: 'Standard secondary packaging box' },
+    { name: 'Carton', abbr: 'ctn', desc: 'Outer master shipping carton containing multiple boxes' },
+    { name: 'Pack', abbr: 'pack', desc: 'Multi-item consumer or dispenser pack' },
+    { name: 'Strip', abbr: 'strip', desc: 'Foil or plastic medicine strip' },
+    { name: 'Bottle', abbr: 'btl', desc: 'Liquid, syrup, or tablet bottle' },
+    { name: 'Vial', abbr: 'vial', desc: 'Sterile injection or solution vial' },
+    { name: 'Piece', abbr: 'pc', desc: 'Single wholesale unit piece' },
+    { name: 'Ampoule', abbr: 'amp', desc: 'Single-use glass ampoule' },
+    { name: 'Tube', abbr: 'tube', desc: 'Ointment or cream tube' },
+    { name: 'Tin', abbr: 'tin', desc: 'Metal container or canister' },
+    { name: 'Drum', abbr: 'drum', desc: 'Bulk liquid or raw ingredient drum' },
+    { name: 'Crate', abbr: 'crate', desc: 'Wholesale delivery crate' },
+    { name: 'Bundle', abbr: 'bdl', desc: 'Bound collection of packages' },
+    { name: 'Case', abbr: 'case', desc: 'Protective shipper case' },
+    { name: 'Jar', abbr: 'jar', desc: 'Wide-mouth powder or tablet jar' },
+    { name: 'Container', abbr: 'cont', desc: 'Sealed wholesale storage container' },
+    { name: 'Roll', abbr: 'roll', desc: 'Bulk surgical dressing or tape roll' },
+    { name: 'Kit', abbr: 'kit', desc: 'Complete diagnostic or treatment procedure kit' }
+  ];
+
+  for (const pu of purchaseUnits) {
+    await prisma.purchaseUnit.upsert({
+      where: { name: pu.name },
+      update: { abbreviation: pu.abbr, description: pu.desc },
+      create: {
+        name: pu.name,
+        abbreviation: pu.abbr,
+        description: pu.desc,
+        isActive: true
+      }
+    });
+  }
+
+  console.log(`   -> Seeded ${categories.length} Categories, ${subcategoryData.length} Subcategories, ` +
+    `${dosageForms.reduce((sum, g) => sum + g.names.length, 0)} Dosage Forms, ` +
+    `${sellingUnits.length} Selling Units, and ${purchaseUnits.length} Purchase Units.`);
+
   // -------------------------------------------------------------
-  // 4. MANUFACTURERS
+  // 4. PHARMACEUTICAL MANUFACTURERS
   // -------------------------------------------------------------
-  console.log('\n[4/13] Seeding Pharmaceutical Manufacturers...');
+  console.log('\n[4/7] Seeding Pharmaceutical Manufacturers...');
   const manufacturerData = [
     { name: 'GlaxoSmithKline (GSK) Pharmaceuticals', country: 'United Kingdom', contactPhone: '+44 20 8047 5000' },
     { name: 'Cipla Limited', country: 'India', contactPhone: '+91 22 2482 6000' },
@@ -189,23 +538,27 @@ async function main() {
     { name: 'Astron Limited Sri Lanka', country: 'Sri Lanka', contactPhone: '+94 11 263 6441' },
     { name: 'State Pharmaceuticals Manufacturing Corporation (SPMC)', country: 'Sri Lanka', contactPhone: '+94 11 285 0374' },
     { name: 'Pfizer Pharmaceuticals', country: 'United States', contactPhone: '+1 212 733 2323' },
-    { name: 'Bayer Healthcare AG', country: 'Germany', contactPhone: '+49 214 301' }
+    { name: 'Bayer Healthcare AG', country: 'Germany', contactPhone: '+49 214 301' },
+    { name: 'Torrent Pharmaceuticals Ltd', country: 'India', contactPhone: '+91 79 2659 9000' },
+    { name: 'Novartis AG', country: 'Switzerland', contactPhone: '+41 61 324 1111' },
+    { name: 'Sanofi S.A.', country: 'France', contactPhone: '+33 1 53 77 40 00' },
+    { name: 'Abbott Laboratories', country: 'United States', contactPhone: '+1 224 667 6100' },
+    { name: 'Glenmark Pharmaceuticals', country: 'India', contactPhone: '+91 22 4018 9999' }
   ];
 
-  const mfgMap: Record<string, bigint> = {};
   for (const m of manufacturerData) {
-    const record = await prisma.manufacturer.upsert({
+    await prisma.manufacturer.upsert({
       where: { name: m.name },
       update: { country: m.country, contactPhone: m.contactPhone },
       create: { name: m.name, country: m.country, contactPhone: m.contactPhone, isActive: true }
     });
-    mfgMap[m.name] = record.id;
   }
+  console.log(`   -> Seeded ${manufacturerData.length} Pharmaceutical Manufacturers.`);
 
   // -------------------------------------------------------------
-  // 5. GENERIC MOLECULES
+  // 5. ESSENTIAL GENERIC DRUG MOLECULES
   // -------------------------------------------------------------
-  console.log('\n[5/13] Seeding Generic Molecules...');
+  console.log('\n[5/7] Seeding Generic Drug Molecules...');
   const genericData = [
     { name: 'Paracetamol', therapeuticClass: 'Analgesic / Antipyretic' },
     { name: 'Amoxicillin + Clavulanic Acid', therapeuticClass: 'Penicillin / Beta-lactamase inhibitor' },
@@ -213,9 +566,12 @@ async function main() {
     { name: 'Atorvastatin Calcium', therapeuticClass: 'HMG-CoA Reductase Inhibitor (Statin)' },
     { name: 'Losartan Potassium', therapeuticClass: 'Angiotensin Receptor Blocker (ARB)' },
     { name: 'Omeprazole', therapeuticClass: 'Proton Pump Inhibitor (PPI)' },
+    { name: 'Pantoprazole Sodium', therapeuticClass: 'Proton Pump Inhibitor (PPI)' },
     { name: 'Salbutamol Sulfate', therapeuticClass: 'Short-acting Beta-2 Agonist' },
     { name: 'Cetirizine Dihydrochloride', therapeuticClass: 'Second-generation Antihistamine' },
+    { name: 'Fexofenadine Hydrochloride', therapeuticClass: 'Non-sedating Antihistamine' },
     { name: 'Ciprofloxacin HCl', therapeuticClass: 'Fluoroquinolone Antibacterial' },
+    { name: 'Levofloxacin Hemihydrate', therapeuticClass: 'Fluoroquinolone Antibacterial' },
     { name: 'Tramadol Hydrochloride', therapeuticClass: 'Synthetic Opioid Analgesic' },
     { name: 'Amlodipine Besylate', therapeuticClass: 'Calcium Channel Blocker' },
     { name: 'Gliclazide', therapeuticClass: 'Sulfonylurea Antidiabetic' },
@@ -224,1426 +580,49 @@ async function main() {
     { name: 'Clotrimazole 1%', therapeuticClass: 'Broad-spectrum Topical Antifungal' },
     { name: 'Azithromycin Dihydrate', therapeuticClass: 'Macrolide Antibiotic' },
     { name: 'Doxycycline Hyclate', therapeuticClass: 'Tetracycline Antibiotic' },
-    { name: 'Cefixime Trihydrate', therapeuticClass: 'Third-generation Cephalosporin' }
+    { name: 'Cefixime Trihydrate', therapeuticClass: 'Third-generation Cephalosporin' },
+    { name: 'Montelukast Sodium', therapeuticClass: 'Leukotriene Receptor Antagonist' },
+    { name: 'Rosuvastatin Calcium', therapeuticClass: 'Lipid-lowering Statin' },
+    { name: 'Domperidone', therapeuticClass: 'Dopamine D2 Receptor Antagonist (Antiemetic)' }
   ];
 
-  const genMap: Record<string, bigint> = {};
   for (const g of genericData) {
-    const record = await prisma.genericMolecule.upsert({
+    await prisma.genericMolecule.upsert({
       where: { name: g.name },
       update: { therapeuticClass: g.therapeuticClass },
       create: { name: g.name, therapeuticClass: g.therapeuticClass }
     });
-    genMap[g.name] = record.id;
   }
+  console.log(`   -> Seeded ${genericData.length} Generic Drug Molecules.`);
 
   // -------------------------------------------------------------
-  // 6. SUPPLIERS
+  // 6. OPERATIONAL EXPENSE CATEGORIES
   // -------------------------------------------------------------
-  console.log('\n[6/13] Seeding Suppliers with Credit Limits & Payment Terms...');
-  const suppliers = [
-    {
-      name: 'Hemas Pharmaceuticals PLC',
-      contactPerson: 'Mr. Samantha Silva (Area Sales Head)',
-      phone: '0112445566',
-      email: 'orders@hemaspharma.com',
-      address: 'Hemas Building, York Street, Colombo 01',
-      paymentTerms: '30 Days Credit',
-      creditLimit: 1500000,
-      currentBalance: 0
-    },
-    {
-      name: 'George Steuart Health (Pvt) Ltd',
-      contactPerson: 'Ms. Nilanthi Perera',
-      phone: '0114702500',
-      email: 'pharma@georgesteuart.lk',
-      address: 'No. 19, St. Michael\'s Road, Colombo 03',
-      paymentTerms: '30 Days Credit',
-      creditLimit: 1200000,
-      currentBalance: 7750
-    },
-    {
-      name: 'State Pharmaceuticals Corporation (SPC)',
-      contactPerson: 'Mr. K.B. Bandara',
-      phone: '0112320356',
-      email: 'procurement@spc.lk',
-      address: '75 Sir Baron Jayatilaka Mw, Colombo 01',
-      paymentTerms: '14 Days Net',
-      creditLimit: 800000,
-      currentBalance: 0
-    },
-    {
-      name: 'A. Baur & Co. (Pvt) Ltd',
-      contactPerson: 'Mrs. K. Jayasuriya',
-      phone: '0112448899',
-      email: 'healthcare@baurs.com',
-      address: '62 Jethawana Road, Grandpass, Colombo 14',
-      paymentTerms: '30 Days Credit',
-      creditLimit: 1000000,
-      currentBalance: 0
-    },
-    {
-      name: 'CIC Holdings PLC Healthcare Division',
-      contactPerson: 'Mr. Rohan Wickramasinghe',
-      phone: '0112359359',
-      email: 'pharma.sales@cic.lk',
-      address: '199 Kew Road, Colombo 02',
-      paymentTerms: '45 Days Credit',
-      creditLimit: 2000000,
-      currentBalance: 0
-    }
-  ];
-
-  const supplierMap: Record<string, bigint> = {};
-  for (let i = 0; i < suppliers.length; i++) {
-    const s = suppliers[i];
-    const sup = await prisma.supplier.upsert({
-      where: { id: BigInt(i + 1) },
-      update: {
-        name: s.name,
-        contactPerson: s.contactPerson,
-        phone: s.phone,
-        email: s.email,
-        address: s.address,
-        paymentTerms: s.paymentTerms,
-        creditLimit: new Prisma.Decimal(s.creditLimit),
-        currentBalance: new Prisma.Decimal(s.currentBalance)
-      },
-      create: {
-        name: s.name,
-        contactPerson: s.contactPerson,
-        phone: s.phone,
-        email: s.email,
-        address: s.address,
-        paymentTerms: s.paymentTerms,
-        creditLimit: new Prisma.Decimal(s.creditLimit),
-        currentBalance: new Prisma.Decimal(s.currentBalance),
-        isActive: true
-      }
-    });
-    supplierMap[s.name] = sup.id;
-  }
-
-  // -------------------------------------------------------------
-  // 7. MEDICINES, PACKAGING UNITS & REALISTIC FEFO BATCHES
-  // -------------------------------------------------------------
-  console.log('\n[7/13] Seeding Comprehensive Sri Lankan Medicine Inventory & Batches...');
-
-  const dateDaysFromNow = (days: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    return d;
-  };
-
-  const medicineDefinitions = [
-    {
-      name: 'Paracetamol 500mg Tablets',
-      brandName: 'Panadol',
-      genericKey: 'Paracetamol',
-      mfgKey: 'GlaxoSmithKline (GSK) Pharmaceuticals',
-      categoryCode: 'ANALGESICS',
-      barcode: '4792012001015',
-      skuCode: 'MED-PAN-500',
-      strength: '500mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: false,
-      isNarcotic: false,
-      reorderLevel: 100,
-      storageCondition: 'Store below 30°C in dry place',
-      costPrice: 4.50,
-      sellingPrice: 7.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012001022' },
-        { unitName: 'Box', factor: 100, barcode: '4792012001039' }
-      ],
-      batches: [
-        { batchNumber: 'PAN-2026-A1', mfgDate: new Date('2025-08-01'), expiryDate: dateDaysFromNow(540), quantity: 850, status: BatchStatus.ACTIVE, cost: 4.50, sell: 7.00 },
-        { batchNumber: 'PAN-2025-X4', mfgDate: new Date('2024-04-10'), expiryDate: dateDaysFromNow(22), quantity: 120, status: BatchStatus.NEAR_EXPIRY, cost: 4.20, sell: 6.50 }
-      ]
-    },
-    {
-      name: 'Amoxicillin + Clavulanate 625mg Tablets',
-      brandName: 'Augmentin 625mg',
-      genericKey: 'Amoxicillin + Clavulanic Acid',
-      mfgKey: 'GlaxoSmithKline (GSK) Pharmaceuticals',
-      categoryCode: 'ANTIBIOTICS',
-      barcode: '4792012002012',
-      skuCode: 'MED-AUG-625',
-      strength: '625mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 50,
-      storageCondition: 'Store in airtight blister below 25°C',
-      costPrice: 145.00,
-      sellingPrice: 195.00,
-      units: [
-        { unitName: 'Strip (7s)', factor: 7, barcode: '4792012002039' },
-        { unitName: 'Box (14s)', factor: 14, barcode: '4792012002046' }
-      ],
-      batches: [
-        { batchNumber: 'AUG-2026-01', mfgDate: new Date('2025-10-15'), expiryDate: dateDaysFromNow(420), quantity: 280, status: BatchStatus.ACTIVE, cost: 145.00, sell: 195.00 }
-      ]
-    },
-    {
-      name: 'Metformin Hydrochloride 500mg Tablets',
-      brandName: 'Glucophage 500mg',
-      genericKey: 'Metformin Hydrochloride',
-      mfgKey: 'Sun Pharma Laboratories Ltd',
-      categoryCode: 'ANTIDIABETIC',
-      barcode: '4792012003039',
-      skuCode: 'MED-GLU-500',
-      strength: '500mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 150,
-      storageCondition: 'Store below 25°C',
-      costPrice: 6.50,
-      sellingPrice: 11.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012003046' },
-        { unitName: 'Box', factor: 100, barcode: '4792012003053' }
-      ],
-      batches: [
-        { batchNumber: 'GLU-2026-M1', mfgDate: new Date('2025-11-01'), expiryDate: dateDaysFromNow(600), quantity: 1200, status: BatchStatus.ACTIVE, cost: 6.50, sell: 11.00 },
-        { batchNumber: 'GLU-2025-E2', mfgDate: new Date('2024-06-15'), expiryDate: dateDaysFromNow(28), quantity: 150, status: BatchStatus.NEAR_EXPIRY, cost: 6.00, sell: 10.00 }
-      ]
-    },
-    {
-      name: 'Atorvastatin Calcium 20mg Tablets',
-      brandName: 'Lipitor 20mg',
-      genericKey: 'Atorvastatin Calcium',
-      mfgKey: 'Pfizer Pharmaceuticals',
-      categoryCode: 'CARDIO',
-      barcode: '4792012004046',
-      skuCode: 'MED-LIP-20',
-      strength: '20mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 60,
-      storageCondition: 'Store at 20°C to 25°C',
-      costPrice: 36.00,
-      sellingPrice: 54.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012004053' },
-        { unitName: 'Box (30s)', factor: 30, barcode: '4792012004060' }
-      ],
-      batches: [
-        { batchNumber: 'LIP-2026-S1', mfgDate: new Date('2025-09-01'), expiryDate: dateDaysFromNow(480), quantity: 420, status: BatchStatus.ACTIVE, cost: 36.00, sell: 54.00 }
-      ]
-    },
-    {
-      name: 'Losartan Potassium 50mg Film-Coated Tablets',
-      brandName: 'Losartan Stada 50mg',
-      genericKey: 'Losartan Potassium',
-      mfgKey: 'Astron Limited Sri Lanka',
-      categoryCode: 'CARDIO',
-      barcode: '4792012005053',
-      skuCode: 'MED-LOS-50',
-      strength: '50mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 80,
-      storageCondition: 'Protect from light and moisture',
-      costPrice: 14.00,
-      sellingPrice: 22.00,
-      units: [
-        { unitName: 'Strip (14s)', factor: 14, barcode: '4792012005060' },
-        { unitName: 'Box (28s)', factor: 28, barcode: '4792012005077' }
-      ],
-      batches: [
-        { batchNumber: 'LOS-2026-K1', mfgDate: new Date('2025-07-20'), expiryDate: dateDaysFromNow(510), quantity: 560, status: BatchStatus.ACTIVE, cost: 14.00, sell: 22.00 }
-      ]
-    },
-    {
-      name: 'Omeprazole 20mg Delayed-Release Capsules',
-      brandName: 'Omez 20mg',
-      genericKey: 'Omeprazole',
-      mfgKey: 'Cipla Limited',
-      categoryCode: 'GASTRO',
-      barcode: '4792012006060',
-      skuCode: 'MED-OMZ-20',
-      strength: '20mg',
-      dosageForm: DosageForm.CAPSULE,
-      baseUnit: 'capsule',
-      prescriptionRequired: false,
-      isNarcotic: false,
-      reorderLevel: 100,
-      storageCondition: 'Store in original container below 25°C',
-      costPrice: 13.00,
-      sellingPrice: 21.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012006077' },
-        { unitName: 'Box', factor: 100, barcode: '4792012006084' }
-      ],
-      batches: [
-        { batchNumber: 'OMZ-2026-P2', mfgDate: new Date('2025-10-01'), expiryDate: dateDaysFromNow(450), quantity: 900, status: BatchStatus.ACTIVE, cost: 13.00, sell: 21.00 }
-      ]
-    },
-    {
-      name: 'Salbutamol Inhaler 100mcg (200 Doses)',
-      brandName: 'Ventolin Evohaler',
-      genericKey: 'Salbutamol Sulfate',
-      mfgKey: 'GlaxoSmithKline (GSK) Pharmaceuticals',
-      categoryCode: 'RESPIRATORY',
-      barcode: '4792012007074',
-      skuCode: 'MED-VENT-100',
-      strength: '100mcg/actuation',
-      dosageForm: DosageForm.INHALER,
-      baseUnit: 'inhaler',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 20,
-      storageCondition: 'Store below 30°C. Protect from frost and direct sunlight.',
-      costPrice: 1280.00,
-      sellingPrice: 1650.00,
-      units: [],
-      batches: [
-        { batchNumber: 'VEN-2026-V1', mfgDate: new Date('2025-09-10'), expiryDate: dateDaysFromNow(390), quantity: 45, status: BatchStatus.ACTIVE, cost: 1280.00, sell: 1650.00 }
-      ]
-    },
-    {
-      name: 'Cetirizine Dihydrochloride 10mg Tablets',
-      brandName: 'Zyrtec 10mg',
-      genericKey: 'Cetirizine Dihydrochloride',
-      mfgKey: 'Astron Limited Sri Lanka',
-      categoryCode: 'RESPIRATORY',
-      barcode: '4792012008081',
-      skuCode: 'MED-ZYR-10',
-      strength: '10mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: false,
-      isNarcotic: false,
-      reorderLevel: 75,
-      storageCondition: 'Store below 25°C',
-      costPrice: 7.00,
-      sellingPrice: 13.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012008098' },
-        { unitName: 'Box', factor: 100, barcode: '4792012008104' }
-      ],
-      batches: [
-        { batchNumber: 'ZYR-2026-C1', mfgDate: new Date('2025-11-20'), expiryDate: dateDaysFromNow(660), quantity: 600, status: BatchStatus.ACTIVE, cost: 7.00, sell: 13.00 }
-      ]
-    },
-    {
-      name: 'Ciprofloxacin 500mg Tablets',
-      brandName: 'Ciprobid 500mg',
-      genericKey: 'Ciprofloxacin HCl',
-      mfgKey: 'Cipla Limited',
-      categoryCode: 'ANTIBIOTICS',
-      barcode: '4792012009095',
-      skuCode: 'MED-CIP-500',
-      strength: '500mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 50,
-      storageCondition: 'Store in dry place below 25°C',
-      costPrice: 24.00,
-      sellingPrice: 38.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012009101' },
-        { unitName: 'Box', factor: 50, barcode: '4792012009118' }
-      ],
-      batches: [
-        { batchNumber: 'CIP-2026-R4', mfgDate: new Date('2025-08-15'), expiryDate: dateDaysFromNow(410), quantity: 350, status: BatchStatus.ACTIVE, cost: 24.00, sell: 38.00 }
-      ]
-    },
-    {
-      name: 'Tramadol HCl 50mg Capsules (Controlled Substance)',
-      brandName: 'Tramal 50mg',
-      genericKey: 'Tramadol Hydrochloride',
-      mfgKey: 'State Pharmaceuticals Manufacturing Corporation (SPMC)',
-      categoryCode: 'NARCOTICS',
-      barcode: '4792012010107',
-      skuCode: 'MED-TRA-50',
-      strength: '50mg',
-      dosageForm: DosageForm.CAPSULE,
-      baseUnit: 'capsule',
-      prescriptionRequired: true,
-      isNarcotic: true,
-      reorderLevel: 40,
-      storageCondition: 'Schedule II Narcotics Safe Lock Box',
-      costPrice: 22.00,
-      sellingPrice: 35.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012010114' }
-      ],
-      batches: [
-        { batchNumber: 'TRM-2026-N1', mfgDate: new Date('2025-10-05'), expiryDate: dateDaysFromNow(490), quantity: 180, status: BatchStatus.ACTIVE, cost: 22.00, sell: 35.00 }
-      ]
-    },
-    {
-      name: 'Amlodipine Besylate 5mg Tablets',
-      brandName: 'Norvasc 5mg',
-      genericKey: 'Amlodipine Besylate',
-      mfgKey: 'Pfizer Pharmaceuticals',
-      categoryCode: 'CARDIO',
-      barcode: '4792012011111',
-      skuCode: 'MED-NOR-5',
-      strength: '5mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 60,
-      storageCondition: 'Store below 30°C',
-      costPrice: 16.00,
-      sellingPrice: 26.00,
-      units: [
-        { unitName: 'Strip (14s)', factor: 14, barcode: '4792012011128' },
-        { unitName: 'Box (28s)', factor: 28, barcode: '4792012011135' }
-      ],
-      batches: [
-        { batchNumber: 'NOR-2026-A5', mfgDate: new Date('2025-09-25'), expiryDate: dateDaysFromNow(520), quantity: 400, status: BatchStatus.ACTIVE, cost: 16.00, sell: 26.00 }
-      ]
-    },
-    {
-      name: 'Gliclazide Modified-Release 60mg Tablets',
-      brandName: 'Diamicron MR 60mg',
-      genericKey: 'Gliclazide',
-      mfgKey: 'Astron Limited Sri Lanka',
-      categoryCode: 'ANTIDIABETIC',
-      barcode: '4792012012125',
-      skuCode: 'MED-DIA-60',
-      strength: '60mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 50,
-      storageCondition: 'Store below 25°C',
-      costPrice: 26.00,
-      sellingPrice: 40.00,
-      units: [
-        { unitName: 'Strip (15s)', factor: 15, barcode: '4792012012132' },
-        { unitName: 'Box (60s)', factor: 60, barcode: '4792012012149' }
-      ],
-      batches: [
-        { batchNumber: 'DIA-2026-G2', mfgDate: new Date('2025-10-18'), expiryDate: dateDaysFromNow(580), quantity: 360, status: BatchStatus.ACTIVE, cost: 26.00, sell: 40.00 }
-      ]
-    },
-    {
-      name: 'Corex D Cough & Cold Syrup 100ml',
-      brandName: 'Corex D Syrup',
-      genericKey: 'Dextromethorphan + Chlorpheniramine',
-      mfgKey: 'Pfizer Pharmaceuticals',
-      categoryCode: 'RESPIRATORY',
-      barcode: '4792012013139',
-      skuCode: 'MED-COR-100',
-      strength: '100ml Bottle',
-      dosageForm: DosageForm.SYRUP,
-      baseUnit: 'bottle',
-      prescriptionRequired: false,
-      isNarcotic: false,
-      reorderLevel: 25,
-      storageCondition: 'Protect from sunlight. Do not freeze.',
-      costPrice: 410.00,
-      sellingPrice: 560.00,
-      units: [],
-      batches: [
-        { batchNumber: 'COR-2026-S3', mfgDate: new Date('2025-07-15'), expiryDate: dateDaysFromNow(365), quantity: 85, status: BatchStatus.ACTIVE, cost: 410.00, sell: 560.00 }
-      ]
-    },
-    {
-      name: 'Cebion Vitamin C 500mg Chewable Tablets (Orange)',
-      brandName: 'Cebion Orange 500mg',
-      genericKey: 'Ascorbic Acid (Vitamin C) 500mg',
-      mfgKey: 'Bayer Healthcare AG',
-      categoryCode: 'SUPPLEMENTS',
-      barcode: '4792012014143',
-      skuCode: 'MED-CEB-500',
-      strength: '500mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: false,
-      isNarcotic: false,
-      reorderLevel: 80,
-      storageCondition: 'Store below 25°C in dry container',
-      costPrice: 9.00,
-      sellingPrice: 16.00,
-      units: [
-        { unitName: 'Strip', factor: 10, barcode: '4792012014150' },
-        { unitName: 'Box', factor: 100, barcode: '4792012014167' }
-      ],
-      batches: [
-        { batchNumber: 'CEB-2026-V8', mfgDate: new Date('2025-11-05'), expiryDate: dateDaysFromNow(550), quantity: 750, status: BatchStatus.ACTIVE, cost: 9.00, sell: 16.00 }
-      ]
-    },
-    {
-      name: 'Canesten 1% Topical Antifungal Cream 20g',
-      brandName: 'Canesten Cream 20g',
-      genericKey: 'Clotrimazole 1%',
-      mfgKey: 'Bayer Healthcare AG',
-      categoryCode: 'DERMA',
-      barcode: '4792012015157',
-      skuCode: 'MED-CAN-20',
-      strength: '1% w/w 20g',
-      dosageForm: DosageForm.CREAM,
-      baseUnit: 'tube',
-      prescriptionRequired: false,
-      isNarcotic: false,
-      reorderLevel: 20,
-      storageCondition: 'Store below 25°C',
-      costPrice: 320.00,
-      sellingPrice: 460.00,
-      units: [],
-      batches: [
-        { batchNumber: 'CAN-2026-T1', mfgDate: new Date('2025-08-25'), expiryDate: dateDaysFromNow(460), quantity: 60, status: BatchStatus.ACTIVE, cost: 320.00, sell: 460.00 }
-      ]
-    },
-    // LOW STOCK SAMPLE: Azithromycin 500mg (Triggers Low Stock Notification Pill!)
-    {
-      name: 'Azithromycin 500mg Film-Coated Tablets',
-      brandName: 'Zithromax 500mg',
-      genericKey: 'Azithromycin Dihydrate',
-      mfgKey: 'Pfizer Pharmaceuticals',
-      categoryCode: 'ANTIBIOTICS',
-      barcode: '4792012016161',
-      skuCode: 'MED-AZI-500',
-      strength: '500mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 50,
-      storageCondition: 'Store below 30°C',
-      costPrice: 110.00,
-      sellingPrice: 165.00,
-      units: [
-        { unitName: 'Strip (3s)', factor: 3, barcode: '4792012016178' }
-      ],
-      batches: [
-        { batchNumber: 'AZI-2026-LOW', mfgDate: new Date('2025-09-01'), expiryDate: dateDaysFromNow(380), quantity: 15, status: BatchStatus.ACTIVE, cost: 110.00, sell: 165.00 }
-      ]
-    },
-    // EXPIRED LOT SAMPLE: Doxycycline 100mg (Triggers Expired alert & FEFO safety lockout!)
-    {
-      name: 'Doxycycline 100mg Capsules',
-      brandName: 'Doxypal 100mg',
-      genericKey: 'Doxycycline Hyclate',
-      mfgKey: 'State Pharmaceuticals Manufacturing Corporation (SPMC)',
-      categoryCode: 'ANTIBIOTICS',
-      barcode: '4792012017175',
-      skuCode: 'MED-DOX-100',
-      strength: '100mg',
-      dosageForm: DosageForm.CAPSULE,
-      baseUnit: 'capsule',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 40,
-      storageCondition: 'Protect from light and moisture',
-      costPrice: 12.00,
-      sellingPrice: 20.00,
-      units: [],
-      batches: [
-        { batchNumber: 'DOX-2024-EXP', mfgDate: new Date('2023-01-10'), expiryDate: dateDaysFromNow(-45), quantity: 40, status: BatchStatus.EXPIRED, cost: 12.00, sell: 20.00 }
-      ]
-    },
-    // QUARANTINED LOT SAMPLE: Cefixime 200mg (Damaged in transit / QC Hold)
-    {
-      name: 'Cefixime 200mg Dispersible Tablets',
-      brandName: 'Cefspan 200mg',
-      genericKey: 'Cefixime Trihydrate',
-      mfgKey: 'Cipla Limited',
-      categoryCode: 'ANTIBIOTICS',
-      barcode: '4792012018189',
-      skuCode: 'MED-CEF-200',
-      strength: '200mg',
-      dosageForm: DosageForm.TABLET,
-      baseUnit: 'tablet',
-      prescriptionRequired: true,
-      isNarcotic: false,
-      reorderLevel: 30,
-      storageCondition: 'Store below 25°C in airtight foil',
-      costPrice: 75.00,
-      sellingPrice: 115.00,
-      units: [],
-      batches: [
-        { batchNumber: 'CEF-2026-Q1', mfgDate: new Date('2025-06-10'), expiryDate: dateDaysFromNow(300), quantity: 25, status: BatchStatus.QUARANTINED, cost: 75.00, sell: 115.00 }
-      ]
-    }
-  ];
-
-  const batchMap: Record<string, bigint> = {};
-  const medMap: Record<string, bigint> = {};
-
-  // Resolve any conflicting barcodes from previous initial seeds
-  for (const m of medicineDefinitions) {
-    if (m.barcode) {
-      const conflict = await prisma.medicine.findFirst({
-        where: { barcode: m.barcode, NOT: { skuCode: m.skuCode } }
-      });
-      if (conflict) {
-        await prisma.medicine.update({
-          where: { id: conflict.id },
-          data: { barcode: null }
-        });
-      }
-    }
-  }
-
-  for (const m of medicineDefinitions) {
-    const existingMed = await prisma.medicine.findFirst({
-      where: {
-        OR: [
-          { skuCode: m.skuCode },
-          ...(m.barcode ? [{ barcode: m.barcode }] : [])
-        ]
-      }
-    });
-
-    let med;
-    if (existingMed) {
-      med = await prisma.medicine.update({
-        where: { id: existingMed.id },
-        data: {
-          name: m.name,
-          brandName: m.brandName,
-          barcode: m.barcode,
-          skuCode: m.skuCode,
-          categoryId: catMap[m.categoryCode],
-          manufacturerId: mfgMap[m.mfgKey],
-          genericId: genMap[m.genericKey],
-          strength: m.strength,
-          dosageForm: m.dosageForm,
-          baseUnit: m.baseUnit,
-          prescriptionRequired: m.prescriptionRequired,
-          isNarcotic: m.isNarcotic,
-          reorderLevel: new Prisma.Decimal(m.reorderLevel),
-          storageCondition: m.storageCondition,
-          isActive: true
-        }
-      });
-    } else {
-      med = await prisma.medicine.create({
-        data: {
-          name: m.name,
-          brandName: m.brandName,
-          barcode: m.barcode,
-          skuCode: m.skuCode,
-          categoryId: catMap[m.categoryCode],
-          manufacturerId: mfgMap[m.mfgKey],
-          genericId: genMap[m.genericKey],
-          strength: m.strength,
-          dosageForm: m.dosageForm,
-          baseUnit: m.baseUnit,
-          prescriptionRequired: m.prescriptionRequired,
-          isNarcotic: m.isNarcotic,
-          reorderLevel: new Prisma.Decimal(m.reorderLevel),
-          storageCondition: m.storageCondition,
-          isActive: true
-        }
-      });
-    }
-
-    medMap[m.skuCode] = med.id;
-
-    // Seed packaging units
-    for (const u of m.units) {
-      if (u.barcode) {
-        const conflictUnit = await prisma.medicineUnit.findFirst({
-          where: { barcode: u.barcode, NOT: { medicineId: med.id, unitName: u.unitName } }
-        });
-        if (conflictUnit) {
-          await prisma.medicineUnit.update({
-            where: { id: conflictUnit.id },
-            data: { barcode: null }
-          });
-        }
-      }
-
-      await prisma.medicineUnit.upsert({
-        where: {
-          uk_medicine_unit: {
-            medicineId: med.id,
-            unitName: u.unitName
-          }
-        },
-        update: {
-          baseUnitFactor: new Prisma.Decimal(u.factor),
-          barcode: u.barcode,
-          isSellable: true
-        },
-        create: {
-          medicineId: med.id,
-          unitName: u.unitName,
-          baseUnitFactor: new Prisma.Decimal(u.factor),
-          barcode: u.barcode,
-          isSellable: true
-        }
-      });
-    }
-
-    // Seed Batches
-    for (const b of m.batches) {
-      const batchRecord = await prisma.medicineBatch.upsert({
-        where: {
-          uk_medicine_batch: {
-            medicineId: med.id,
-            batchNumber: b.batchNumber
-          }
-        },
-        update: {
-          expiryDate: b.expiryDate,
-          mfgDate: b.mfgDate,
-          costPrice: new Prisma.Decimal(b.cost),
-          sellingPrice: new Prisma.Decimal(b.sell),
-          quantityOnHand: new Prisma.Decimal(b.quantity),
-          status: b.status
-        },
-        create: {
-          medicineId: med.id,
-          batchNumber: b.batchNumber,
-          mfgDate: b.mfgDate,
-          expiryDate: b.expiryDate,
-          costPrice: new Prisma.Decimal(b.cost),
-          sellingPrice: new Prisma.Decimal(b.sell),
-          quantityOnHand: new Prisma.Decimal(b.quantity),
-          status: b.status
-        }
-      });
-
-      batchMap[b.batchNumber] = batchRecord.id;
-
-      // Seed Initial Stock Movement Ledger Entry for this batch
-      const existingMovement = await prisma.stockMovement.findFirst({
-        where: { batchId: batchRecord.id, referenceType: 'INITIAL_GRN' }
-      });
-
-      if (!existingMovement) {
-        await prisma.stockMovement.create({
-          data: {
-            batchId: batchRecord.id,
-            movementType: MovementType.PURCHASE,
-            quantityDelta: new Prisma.Decimal(b.quantity),
-            balanceAfter: new Prisma.Decimal(b.quantity),
-            referenceType: 'INITIAL_GRN',
-            referenceId: BigInt(1),
-            userId: adminUser.id,
-            note: `Initial opening inventory stock batch ${b.batchNumber}`,
-            createdAt: b.mfgDate || new Date()
-          }
-        });
-      }
-    }
-  }
-
-  console.log(`   -> Seeded ${medicineDefinitions.length} medicines, packaging units, and active FEFO batches.`);
-
-  // -------------------------------------------------------------
-  // 8. PURCHASE ORDERS & GRN INVOICES
-  // -------------------------------------------------------------
-  console.log('\n[8/13] Seeding Completed Procurement GRNs & Supplier Payments...');
-  const existingPO1 = await prisma.purchase.findUnique({ where: { purchaseNumber: 'GRN-2026-0001' } });
-  if (!existingPO1) {
-    const hemasSupplierId = supplierMap['Hemas Pharmaceuticals PLC'];
-    const augBatchId = batchMap['AUG-2026-01'];
-    const panBatchId = batchMap['PAN-2026-A1'];
-    const augMedId = medMap['MED-AUG-625'];
-    const panMedId = medMap['MED-PAN-500'];
-
-    const po1 = await prisma.purchase.create({
-      data: {
-        purchaseNumber: 'GRN-2026-0001',
-        supplierId: hemasSupplierId,
-        supplierInvoiceNo: 'HEM-INV-88912',
-        status: PurchaseStatus.RECEIVED,
-        subtotal: new Prisma.Decimal(45250.00),
-        discountAmount: new Prisma.Decimal(0.00),
-        taxAmount: new Prisma.Decimal(0.00),
-        totalAmount: new Prisma.Decimal(45250.00),
-        amountPaid: new Prisma.Decimal(45250.00),
-        createdBy: adminUser.id,
-        receivedAt: new Date(),
-        items: {
-          create: [
-            {
-              medicineId: augMedId,
-              batchId: augBatchId,
-              batchNumber: 'AUG-2026-01',
-              expiryDate: dateDaysFromNow(420),
-              orderedQuantity: new Prisma.Decimal(200),
-              receivedQuantity: new Prisma.Decimal(200),
-              bonusQuantity: new Prisma.Decimal(10), // 10 Free bonus tablets
-              unitCost: new Prisma.Decimal(145.00),
-              sellingPrice: new Prisma.Decimal(195.00),
-              lineTotal: new Prisma.Decimal(29000.00)
-            },
-            {
-              medicineId: panMedId,
-              batchId: panBatchId,
-              batchNumber: 'PAN-2026-A1',
-              expiryDate: dateDaysFromNow(540),
-              orderedQuantity: new Prisma.Decimal(3500),
-              receivedQuantity: new Prisma.Decimal(3500),
-              bonusQuantity: new Prisma.Decimal(100),
-              unitCost: new Prisma.Decimal(4.50),
-              sellingPrice: new Prisma.Decimal(7.00),
-              lineTotal: new Prisma.Decimal(15750.00)
-            }
-          ]
-        }
-      }
-    });
-
-    await prisma.supplierPayment.create({
-      data: {
-        paymentNumber: 'SPAY-2026-0001',
-        supplierId: hemasSupplierId,
-        purchaseId: po1.id,
-        amount: new Prisma.Decimal(45250.00),
-        paymentMethod: SupplierPayMethod.BANK_TRANSFER,
-        paymentReference: 'COMB-FT-20260312-998',
-        paidAt: new Date(),
-        createdBy: managerUser.id
-      }
-    });
-    console.log('   -> Seeded GRN-2026-0001 with supplier payment');
-  }
-
-  // -------------------------------------------------------------
-  // 9. CUSTOMERS, CLINICAL PATIENTS & PRESCRIPTIONS
-  // -------------------------------------------------------------
-  console.log('\n[9/13] Seeding Customers, Clinical Patients (Allergies/Conditions) & Prescriptions...');
-  const customerData = [
-    {
-      name: 'K.A. Nimal Perera',
-      phone: '0771234567',
-      email: 'nimal.perera@gmail.com',
-      address: 'No. 45/2, Temple Road, Maharagama',
-      whatsappConsent: true,
-      patient: {
-        name: 'K.A. Nimal Perera',
-        age: 58,
-        gender: Gender.MALE,
-        allergies: 'Penicillin (Urticaria/Rash)',
-        conditions: 'Type 2 Diabetes Mellitus, Essential Hypertension'
-      },
-      prescription: {
-        code: 'RX-2026-0089',
-        doctorName: 'Dr. Asela Ratnayake (MBBS, MD)',
-        doctorSlmcNo: 'SLMC-24150',
-        notes: 'Glucophage 500mg 1 tab bd pc, Losartan 50mg 1 tab mane'
-      }
-    },
-    {
-      name: 'M. Sunethra Silva',
-      phone: '0719876543',
-      email: 'sunethra.silva@yahoo.com',
-      address: '12 Lake Drive, Rajagiriya',
-      whatsappConsent: true,
-      patient: {
-        name: 'M. Sunethra Silva',
-        age: 46,
-        gender: Gender.FEMALE,
-        allergies: 'Sulfa drugs, Aspirin',
-        conditions: 'Bronchial Asthma, Dyslipidemia'
-      },
-      prescription: {
-        code: 'RX-2026-0095',
-        doctorName: 'Dr. Priyantha Senaratne (MBBS, MRCP)',
-        doctorSlmcNo: 'SLMC-18920',
-        notes: 'Ventolin Evohaler 2 puffs prn, Cetirizine 10mg nocte'
-      }
-    },
-    {
-      name: 'Mohamed Rilwan',
-      phone: '0768822334',
-      email: 'm.rilwan@gmail.com',
-      address: '88 Main Street, Dehiwala',
-      whatsappConsent: true,
-      patient: {
-        name: 'Mohamed Rilwan',
-        age: 64,
-        gender: Gender.MALE,
-        allergies: 'NKDA (No Known Drug Allergies)',
-        conditions: 'Ischemic Heart Disease, Dyslipidemia'
-      }
-    },
-    {
-      name: 'Walk-in Cash Customer',
-      phone: '0700000000',
-      whatsappConsent: false
-    }
-  ];
-
-  const custMap: Record<string, bigint> = {};
-  const rxMap: Record<string, bigint> = {};
-
-  for (const c of customerData) {
-    const cust = await prisma.customer.upsert({
-      where: { phone: c.phone },
-      update: {
-        name: c.name,
-        email: c.email,
-        address: c.address,
-        whatsappConsent: c.whatsappConsent,
-        consentAt: c.whatsappConsent ? new Date() : null
-      },
-      create: {
-        name: c.name,
-        phone: c.phone,
-        email: c.email,
-        address: c.address,
-        outstandingBalance: new Prisma.Decimal(0),
-        whatsappConsent: c.whatsappConsent,
-        consentAt: c.whatsappConsent ? new Date() : null
-      }
-    });
-
-    custMap[c.name] = cust.id;
-
-    if (c.patient) {
-      let patient = await prisma.patient.findFirst({
-        where: { customerId: cust.id }
-      });
-
-      if (!patient) {
-        patient = await prisma.patient.create({
-          data: {
-            customerId: cust.id,
-            fullName: c.patient.name,
-            age: c.patient.age,
-            gender: c.patient.gender,
-            knownAllergies: c.patient.allergies,
-            chronicConditions: c.patient.conditions
-          }
-        });
-      }
-
-      if (c.prescription && patient) {
-        const rx = await prisma.prescription.upsert({
-          where: { prescriptionCode: c.prescription.code },
-          update: {
-            status: PrescriptionStatus.DISPENSED,
-            dispensedRefills: 1
-          },
-          create: {
-            prescriptionCode: c.prescription.code,
-            patientId: patient.id,
-            doctorName: c.prescription.doctorName,
-            doctorSlmcNo: c.prescription.doctorSlmcNo,
-            prescriptionDate: new Date(),
-            status: PrescriptionStatus.DISPENSED,
-            totalRefills: 3,
-            dispensedRefills: 1,
-            clinicalNotes: c.prescription.notes
-          }
-        });
-        rxMap[c.prescription.code] = rx.id;
-      }
-    }
-  }
-
-  // -------------------------------------------------------------
-  // 10. CASH SESSIONS (Past Closed & Active Open)
-  // -------------------------------------------------------------
-  console.log('\n[10/13] Seeding Daily Cash Sessions (Closed Shift & Active Open Shift)...');
-  const pastSessionDate = new Date();
-  pastSessionDate.setDate(pastSessionDate.getDate() - 1);
-
-  // Past Closed Session
-  let closedSession = await prisma.cashSession.findFirst({
-    where: { status: SessionStatus.CLOSED }
-  });
-
-  if (!closedSession) {
-    closedSession = await prisma.cashSession.create({
-      data: {
-        userId: cashierUser.id,
-        openingFloat: new Prisma.Decimal(5000.00),
-        closingAmount: new Prisma.Decimal(28450.00),
-        expectedAmount: new Prisma.Decimal(28450.00),
-        variance: new Prisma.Decimal(0.00),
-        status: SessionStatus.CLOSED,
-        notes: 'Shift balanced accurately. Daily cash reconciled without variance.',
-        openedAt: pastSessionDate,
-        closedAt: pastSessionDate
-      }
-    });
-  }
-
-  // Active Open Session for Cashier
-  let openSession = await prisma.cashSession.findFirst({
-    where: { userId: cashierUser.id, status: SessionStatus.OPEN }
-  });
-
-  if (!openSession) {
-    openSession = await prisma.cashSession.create({
-      data: {
-        userId: cashierUser.id,
-        openingFloat: new Prisma.Decimal(5000.00),
-        expectedAmount: new Prisma.Decimal(6050.00),
-        status: SessionStatus.OPEN,
-        notes: 'Counter 01 Morning Session open and actively serving POS transactions.',
-        openedAt: new Date()
-      }
-    });
-  }
-
-  console.log(`   -> Active Open Cash Session ID: ${openSession.id} (Opening Float: LKR 5,000.00)`);
-
-  // -------------------------------------------------------------
-  // 11. POS SALES TRANSACTIONS, INVOICES & PAYMENTS
-  // -------------------------------------------------------------
-  console.log('\n[11/13] Seeding Realistic Retail Sales Invoices & Ceylon LankaPay/Card/Cash Payments...');
-
-  // Sale 1: Dispensed Prescription to Nimal Perera (Glucophage + Losartan + Panadol)
-  const existingSale1 = await prisma.sale.findUnique({ where: { invoiceNumber: 'INV-2026-0001' } });
-  if (!existingSale1) {
-    const sale1 = await prisma.sale.create({
-      data: {
-        invoiceNumber: 'INV-2026-0001',
-        idempotencyKey: 'IDEMP-INV-2026-0001',
-        cashSessionId: closedSession.id,
-        customerId: custMap['K.A. Nimal Perera'],
-        prescriptionId: rxMap['RX-2026-0089'],
-        cashierId: cashierUser.id,
-        status: SaleStatus.COMPLETED,
-        subtotal: new Prisma.Decimal(1460.00),
-        discountAmount: new Prisma.Decimal(60.00), // LKR 60 senior citizen discount
-        taxAmount: new Prisma.Decimal(0.00),
-        grandTotal: new Prisma.Decimal(1400.00),
-        amountPaid: new Prisma.Decimal(1500.00),
-        changeAmount: new Prisma.Decimal(100.00),
-        reprintCount: 0,
-        createdAt: pastSessionDate,
-        items: {
-          create: [
-            {
-              medicineId: medMap['MED-GLU-500'],
-              batchId: batchMap['GLU-2026-M1'],
-              quantity: new Prisma.Decimal(60),
-              unitPrice: new Prisma.Decimal(11.00),
-              unitCostSnapshot: new Prisma.Decimal(6.50),
-              discountAmount: new Prisma.Decimal(20.00),
-              lineTotal: new Prisma.Decimal(640.00)
-            },
-            {
-              medicineId: medMap['MED-LOS-50'],
-              batchId: batchMap['LOS-2026-K1'],
-              quantity: new Prisma.Decimal(30),
-              unitPrice: new Prisma.Decimal(22.00),
-              unitCostSnapshot: new Prisma.Decimal(14.00),
-              discountAmount: new Prisma.Decimal(20.00),
-              lineTotal: new Prisma.Decimal(640.00)
-            },
-            {
-              medicineId: medMap['MED-PAN-500'],
-              batchId: batchMap['PAN-2026-A1'],
-              quantity: new Prisma.Decimal(20),
-              unitPrice: new Prisma.Decimal(7.00),
-              unitCostSnapshot: new Prisma.Decimal(4.50),
-              discountAmount: new Prisma.Decimal(20.00),
-              lineTotal: new Prisma.Decimal(120.00)
-            }
-          ]
-        },
-        payments: {
-          create: {
-            paymentMethod: PaymentMethod.CASH,
-            amount: new Prisma.Decimal(1400.00),
-            referenceCode: 'CASH-REC-001',
-            status: PaymentStatus.SUCCESS
-          }
-        }
-      }
-    });
-
-    // Record Stock Movement Outflows
-    await prisma.stockMovement.create({
-      data: {
-        batchId: batchMap['GLU-2026-M1'],
-        movementType: MovementType.SALE,
-        quantityDelta: new Prisma.Decimal(-60),
-        balanceAfter: new Prisma.Decimal(1140),
-        referenceType: 'SALE',
-        referenceId: sale1.id,
-        userId: cashierUser.id,
-        note: 'Dispensed on INV-2026-0001 (Prescription RX-2026-0089)'
-      }
-    });
-
-    await prisma.stockMovement.create({
-      data: {
-        batchId: batchMap['LOS-2026-K1'],
-        movementType: MovementType.SALE,
-        quantityDelta: new Prisma.Decimal(-30),
-        balanceAfter: new Prisma.Decimal(530),
-        referenceType: 'SALE',
-        referenceId: sale1.id,
-        userId: cashierUser.id,
-        note: 'Dispensed on INV-2026-0001'
-      }
-    });
-
-    console.log('   -> Seeded INV-2026-0001 (LKR 1,400.00 - Cash)');
-  }
-
-  // Sale 2: Credit Card Sale to Sunethra Silva (Ventolin + Zyrtec + Cebion)
-  const existingSale2 = await prisma.sale.findUnique({ where: { invoiceNumber: 'INV-2026-0002' } });
-  if (!existingSale2) {
-    await prisma.sale.create({
-      data: {
-        invoiceNumber: 'INV-2026-0002',
-        idempotencyKey: 'IDEMP-INV-2026-0002',
-        cashSessionId: closedSession.id,
-        customerId: custMap['M. Sunethra Silva'],
-        prescriptionId: rxMap['RX-2026-0095'],
-        cashierId: cashierUser.id,
-        status: SaleStatus.COMPLETED,
-        subtotal: new Prisma.Decimal(2360.00),
-        discountAmount: new Prisma.Decimal(0.00),
-        taxAmount: new Prisma.Decimal(0.00),
-        grandTotal: new Prisma.Decimal(2360.00),
-        amountPaid: new Prisma.Decimal(2360.00),
-        changeAmount: new Prisma.Decimal(0.00),
-        reprintCount: 0,
-        createdAt: pastSessionDate,
-        items: {
-          create: [
-            {
-              medicineId: medMap['MED-VENT-100'],
-              batchId: batchMap['VEN-2026-V1'],
-              quantity: new Prisma.Decimal(1),
-              unitPrice: new Prisma.Decimal(1650.00),
-              unitCostSnapshot: new Prisma.Decimal(1280.00),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(1650.00)
-            },
-            {
-              medicineId: medMap['MED-ZYR-10'],
-              batchId: batchMap['ZYR-2026-C1'],
-              quantity: new Prisma.Decimal(30),
-              unitPrice: new Prisma.Decimal(13.00),
-              unitCostSnapshot: new Prisma.Decimal(7.00),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(390.00)
-            },
-            {
-              medicineId: medMap['MED-CEB-500'],
-              batchId: batchMap['CEB-2026-V8'],
-              quantity: new Prisma.Decimal(20),
-              unitPrice: new Prisma.Decimal(16.00),
-              unitCostSnapshot: new Prisma.Decimal(9.00),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(320.00)
-            }
-          ]
-        },
-        payments: {
-          create: {
-            paymentMethod: PaymentMethod.CREDIT_CARD,
-            amount: new Prisma.Decimal(2360.00),
-            referenceCode: 'TXN-VISA-88219-COMM',
-            status: PaymentStatus.SUCCESS
-          }
-        }
-      }
-    });
-    console.log('   -> Seeded INV-2026-0002 (LKR 2,360.00 - Credit Card)');
-  }
-
-  // Sale 3: LankaPay QR Digital Payment (Today's Open Session)
-  const existingSale3 = await prisma.sale.findUnique({ where: { invoiceNumber: 'INV-2026-0003' } });
-  if (!existingSale3) {
-    await prisma.sale.create({
-      data: {
-        invoiceNumber: 'INV-2026-0003',
-        idempotencyKey: 'IDEMP-INV-2026-0003',
-        cashSessionId: openSession.id,
-        customerId: custMap['Walk-in Cash Customer'],
-        cashierId: cashierUser.id,
-        status: SaleStatus.COMPLETED,
-        subtotal: new Prisma.Decimal(1050.00),
-        discountAmount: new Prisma.Decimal(0.00),
-        taxAmount: new Prisma.Decimal(0.00),
-        grandTotal: new Prisma.Decimal(1050.00),
-        amountPaid: new Prisma.Decimal(1050.00),
-        changeAmount: new Prisma.Decimal(0.00),
-        reprintCount: 0,
-        createdAt: new Date(),
-        items: {
-          create: [
-            {
-              medicineId: medMap['MED-OMZ-20'],
-              batchId: batchMap['OMZ-2026-P2'],
-              quantity: new Prisma.Decimal(20),
-              unitPrice: new Prisma.Decimal(21.00),
-              unitCostSnapshot: new Prisma.Decimal(13.00),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(420.00)
-            },
-            {
-              medicineId: medMap['MED-COR-100'],
-              batchId: batchMap['COR-2026-S3'],
-              quantity: new Prisma.Decimal(1),
-              unitPrice: new Prisma.Decimal(560.00),
-              unitCostSnapshot: new Prisma.Decimal(410.00),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(560.00)
-            },
-            {
-              medicineId: medMap['MED-PAN-500'],
-              batchId: batchMap['PAN-2026-A1'],
-              quantity: new Prisma.Decimal(10),
-              unitPrice: new Prisma.Decimal(7.00),
-              unitCostSnapshot: new Prisma.Decimal(4.50),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(70.00)
-            }
-          ]
-        },
-        payments: {
-          create: {
-            paymentMethod: PaymentMethod.LANKAPAY_QR,
-            amount: new Prisma.Decimal(1050.00),
-            referenceCode: 'LQR-REF-99210-CEY',
-            status: PaymentStatus.SUCCESS
-          }
-        }
-      }
-    });
-    console.log('   -> Seeded INV-2026-0003 (LKR 1,050.00 - LankaPay QR)');
-  }
-
-  // Sale 4 & Return: Partially Refunded Sale with Restock Ledger
-  const existingSale4 = await prisma.sale.findUnique({ where: { invoiceNumber: 'INV-2026-0004' } });
-  if (!existingSale4) {
-    const sale4 = await prisma.sale.create({
-      data: {
-        invoiceNumber: 'INV-2026-0004',
-        idempotencyKey: 'IDEMP-INV-2026-0004',
-        cashSessionId: closedSession.id,
-        customerId: custMap['Mohamed Rilwan'],
-        cashierId: cashierUser.id,
-        status: SaleStatus.PARTIALLY_REFUNDED,
-        subtotal: new Prisma.Decimal(2080.00),
-        discountAmount: new Prisma.Decimal(0.00),
-        taxAmount: new Prisma.Decimal(0.00),
-        grandTotal: new Prisma.Decimal(2080.00),
-        amountPaid: new Prisma.Decimal(2100.00),
-        changeAmount: new Prisma.Decimal(20.00),
-        reprintCount: 0,
-        createdAt: pastSessionDate,
-        items: {
-          create: [
-            {
-              medicineId: medMap['MED-LIP-20'],
-              batchId: batchMap['LIP-2026-S1'],
-              quantity: new Prisma.Decimal(30),
-              unitPrice: new Prisma.Decimal(54.00),
-              unitCostSnapshot: new Prisma.Decimal(36.00),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(1620.00)
-            },
-            {
-              medicineId: medMap['MED-CAN-20'],
-              batchId: batchMap['CAN-2026-T1'],
-              quantity: new Prisma.Decimal(1),
-              unitPrice: new Prisma.Decimal(460.00),
-              unitCostSnapshot: new Prisma.Decimal(320.00),
-              discountAmount: new Prisma.Decimal(0.00),
-              lineTotal: new Prisma.Decimal(460.00)
-            }
-          ]
-        },
-        payments: {
-          create: {
-            paymentMethod: PaymentMethod.CASH,
-            amount: new Prisma.Decimal(2080.00),
-            referenceCode: 'CASH-REC-004',
-            status: PaymentStatus.SUCCESS
-          }
-        }
-      }
-    });
-
-    const returnItemRecord = await prisma.saleItem.findFirst({
-      where: { saleId: sale4.id, medicineId: medMap['MED-CAN-20'] }
-    });
-
-    if (returnItemRecord) {
-      await prisma.salesReturn.create({
-        data: {
-          returnNumber: 'RET-2026-0001',
-          saleId: sale4.id,
-          reason: 'Customer mistakenly selected ointment instead of cream. Sealed packaging verified.',
-          refundTotal: new Prisma.Decimal(460.00),
-          refundMethod: RefundMethod.CASH,
-          processedBy: cashierUser.id,
-          approvedBy: managerUser.id,
-          returnItems: {
-            create: {
-              saleItemId: returnItemRecord.id,
-              batchId: batchMap['CAN-2026-T1'],
-              returnQuantity: new Prisma.Decimal(1),
-              refundAmount: new Prisma.Decimal(460.00),
-              restockStatus: RestockStatus.RESTOCKED
-            }
-          }
-        }
-      });
-
-      // Restock ledger movement
-      await prisma.stockMovement.create({
-        data: {
-          batchId: batchMap['CAN-2026-T1'],
-          movementType: MovementType.SALE_RETURN,
-          quantityDelta: new Prisma.Decimal(1),
-          balanceAfter: new Prisma.Decimal(60),
-          referenceType: 'SALE_RETURN',
-          referenceId: sale4.id,
-          userId: cashierUser.id,
-          note: 'Restocked return from RET-2026-0001'
-        }
-      });
-      console.log('   -> Seeded Return RET-2026-0001 (LKR 460.00 Restocked to inventory)');
-    }
-  }
-
-  // -------------------------------------------------------------
-  // 12. OPERATING EXPENSES
-  // -------------------------------------------------------------
-  console.log('\n[12/13] Seeding Operational Expenses & Petty Cash Logs...');
+  console.log('\n[6/7] Seeding Operational Expense Categories...');
   const expenseCategories = [
     'Utilities (Electricity, Water, Internet)',
     'Shop Premises Rent & Maintenance',
     'Staff Salaries & Overtime Wages',
     'Packaging, Carry Bags & Thermal Rolls',
     'NMRA License & Legal Regulatory Fees',
-    'Bank Terminal Fees & Merchant Surcharges'
+    'Bank Terminal Fees & Merchant Surcharges',
+    'IT Infrastructure & Software Subscriptions',
+    'Equipment Maintenance & Calibrations'
   ];
 
-  const expCatMap: Record<string, bigint> = {};
   for (const exp of expenseCategories) {
-    const c = await prisma.expenseCategory.upsert({
+    await prisma.expenseCategory.upsert({
       where: { name: exp },
       update: {},
       create: { name: exp }
     });
-    expCatMap[exp] = c.id;
   }
-
-  const sampleExpenses = [
-    {
-      category: 'Utilities (Electricity, Water, Internet)',
-      amount: 18450.00,
-      description: 'CEB Commercial Electricity Bill (February/March billing cycle)',
-      date: new Date('2026-03-05')
-    },
-    {
-      category: 'Utilities (Electricity, Water, Internet)',
-      amount: 4800.00,
-      description: 'SLT Fibre 100Mbps Broadband & Static IP monthly bill',
-      date: new Date('2026-03-08')
-    },
-    {
-      category: 'Packaging, Carry Bags & Thermal Rolls',
-      amount: 6250.00,
-      description: '50 Rolls of 80mm High-Sensitivity BPA-Free Thermal POS Paper',
-      date: new Date('2026-03-10')
-    },
-    {
-      category: 'Packaging, Carry Bags & Thermal Rolls',
-      amount: 3500.00,
-      description: '1,000 Pcs Eco-friendly Biodegradable Medicine Dispensing Bags',
-      date: new Date('2026-03-11'),
-      cashSessionId: closedSession.id
-    },
-    {
-      category: 'NMRA License & Legal Regulatory Fees',
-      amount: 15000.00,
-      description: 'NMRA Annual Retail Pharmacy License Renewal & Inspection Levy',
-      date: new Date('2026-03-01')
-    }
-  ];
-
-  for (const e of sampleExpenses) {
-    const existing = await prisma.expense.findFirst({
-      where: { description: e.description }
-    });
-    if (!existing) {
-      await prisma.expense.create({
-        data: {
-          categoryId: expCatMap[e.category],
-          cashSessionId: e.cashSessionId || null,
-          amount: new Prisma.Decimal(e.amount),
-          description: e.description,
-          createdBy: managerUser.id,
-          expenseDate: e.date
-        }
-      });
-    }
-  }
-  console.log('   -> Seeded operational expense records and petty cash vouchers');
+  console.log(`   -> Seeded ${expenseCategories.length} Operational Expense Categories.`);
 
   // -------------------------------------------------------------
-  // 13. WHATSAPP NOTIFICATION LOGS & PHARMACY SETTINGS
+  // 7. PHARMACY SYSTEM SETTINGS
   // -------------------------------------------------------------
-  console.log('\n[13/13] Seeding WhatsApp Delivery Logs & Pharmacy Settings...');
-
-  const notificationSamples = [
-    {
-      customerName: 'K.A. Nimal Perera',
-      phone: '94771234567',
-      template: 'prescription_refill_reminder',
-      status: NotificationStatus.DELIVERED,
-      payload: { medicine: 'Glucophage 500mg', daysRemaining: 3, rxCode: 'RX-2026-0089' },
-      providerId: 'wamid.HBgMOTE3NzEyMzQ1NjcVAhIAEhgWM0E4OTFFOTkz'
-    },
-    {
-      customerName: 'M. Sunethra Silva',
-      phone: '94719876543',
-      template: 'digital_invoice_receipt',
-      status: NotificationStatus.READ,
-      payload: { invoiceNo: 'INV-2026-0002', totalAmount: 'LKR 2,360.00' },
-      providerId: 'wamid.HBgMOTE3MTk4NzY1NDMVAhIAEhgWM0E4OTFFOTk0'
-    },
-    {
-      customerName: 'Mohamed Rilwan',
-      phone: '94768822334',
-      template: 'health_wellness_tip',
-      status: NotificationStatus.SENT,
-      payload: { topic: 'Monitoring Blood Pressure at Home', advice: 'Take readings at the same time each morning.' },
-      providerId: 'wamid.HBgMOTE3Njg4MjIzMzQVAhIAEhgWM0E4OTFFOTk1'
-    }
-  ];
-
-  for (const n of notificationSamples) {
-    const custId = custMap[n.customerName];
-    const existing = await prisma.notificationLog.findFirst({
-      where: { providerMessageId: n.providerId }
-    });
-    if (!existing) {
-      await prisma.notificationLog.create({
-        data: {
-          customerId: custId,
-          channel: NotificationChannel.WHATSAPP,
-          recipientPhone: n.phone,
-          templateName: n.template,
-          payload: n.payload,
-          providerMessageId: n.providerId,
-          status: n.status,
-          sentAt: new Date()
-        }
-      });
-    }
-  }
-
-  // System Settings
+  console.log('\n[7/7] Seeding Pharmacy Enterprise Configuration Settings...');
   const settings = [
     { key: 'PHARMACY_NAME', value: process.env.PHARMACY_NAME || 'PharmaSys Retail Pharmacy', desc: 'Registered Trading Name' },
     { key: 'PHARMACY_ADDRESS', value: process.env.PHARMACY_ADDRESS || '124 Galle Road, Colombo 03, Sri Lanka', desc: 'Physical Location' },
@@ -1665,15 +644,17 @@ async function main() {
       create: { settingKey: s.key, settingValue: s.value, description: s.desc }
     });
   }
+  console.log(`   -> Seeded ${settings.length} Pharmacy System Settings.`);
 
   console.log('\n================================================================');
-  console.log('   PharmaSys ERP Database Seeding Completed with 100% Success!  ');
+  console.log('   PharmaSys Production Seed Completed with 100% Purity!        ');
+  console.log('   (Zero mock transactions, full classifications & roles ready) ');
   console.log('================================================================\n');
 }
 
 main()
   .catch((e) => {
-    console.error('Seeding error encountered:', e);
+    console.error('Production seeding error encountered:', e);
     process.exit(1);
   })
   .finally(async () => {

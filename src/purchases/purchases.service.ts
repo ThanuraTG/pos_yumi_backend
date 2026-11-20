@@ -21,14 +21,16 @@ export class PurchasesService {
     const poItems = [];
 
     for (const item of dto.items) {
-      const lineTotal = item.orderedQuantity * item.estimatedUnitCost;
+      const qty = Number(item.orderedQuantity ?? item.quantity ?? 1);
+      const unitCost = Number(item.estimatedUnitCost ?? item.unitCost ?? 0);
+      const lineTotal = qty * unitCost;
       subtotal += lineTotal;
       poItems.push({
         medicineId: BigInt(item.medicineId),
         batchNumber: 'PENDING',
         expiryDate: new Date('2099-12-31'),
-        orderedQuantity: item.orderedQuantity,
-        unitCost: item.estimatedUnitCost,
+        orderedQuantity: qty,
+        unitCost: unitCost,
         sellingPrice: 0,
         lineTotal
       });

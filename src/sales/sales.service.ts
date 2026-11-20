@@ -28,23 +28,25 @@ export class SalesService {
           return existingSale;
         }
 
-        // 2. Assert Cashier has an active open cash drawer session (or auto-open if offline sync)
+        // 2. Assert Cashier has an active open cash drawer session for today (or auto-open)
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
         let activeSession = await tx.cashSession.findFirst({
-          where: { userId: userBigInt, status: 'OPEN' }
+          where: { userId: userBigInt, status: 'OPEN', openedAt: { gte: todayStart } }
         });
         if (!activeSession) {
-          if (dto.isOfflineSync) {
-            activeSession = await tx.cashSession.create({
-              data: {
-                userId: userBigInt,
-                openingFloat: new Prisma.Decimal(0),
-                status: 'OPEN',
-                notes: 'Auto-created session for offline POS sync'
-              }
-            });
-          } else {
-            throw new BadRequestException('Cashier has no active open cash session. Please open register float first.');
-          }
+          activeSession = await tx.cashSession.create({
+            data: {
+              userId: userBigInt,
+              openingFloat: dto.isOfflineSync ? new Prisma.Decimal(0) : new Prisma.Decimal(5000),
+              status: 'OPEN',
+              notes: dto.isOfflineSync
+                ? 'Auto-created session for offline POS sync'
+                : 'Daily Cash Register Session',
+              openedAt: new Date()
+            }
+          });
         }
 
         let computedSubtotal = 0;
@@ -122,15 +124,16 @@ export class SalesService {
           Number(dto.taxAmount || 0);
 
         // Validate tender
-        const totalPaid = dto.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+        const totalPayments = dto.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+        const totalTendered = Math.max(Number(dto.amountPaid !== undefined ? dto.amountPaid : 0), totalPayments);
         const currency = process.env.DEFAULT_CURRENCY || 'LKR';
-        if (totalPaid < grandTotal) {
+        if (Math.max(totalPayments, totalTendered) < grandTotal) {
           throw new BadRequestException(
-            `Total payments (${currency} ${totalPaid.toFixed(2)}) cannot be less than Grand Total (${currency} ${grandTotal.toFixed(2)})`
+            `Total payments (${currency} ${totalTendered.toFixed(2)}) cannot be less than Grand Total (${currency} ${grandTotal.toFixed(2)})`
           );
         }
 
-        const changeAmount = totalPaid - grandTotal;
+        const changeAmount = Math.max(0, totalTendered - grandTotal);
 
         // Generate or preserve unique invoice number
         let invoiceNumber = dto.invoiceNumber;
@@ -168,7 +171,7 @@ export class SalesService {
             discountAmount: dto.discountAmount || 0,
             taxAmount: dto.taxAmount || 0,
             grandTotal: grandTotal,
-            amountPaid: dto.amountPaid,
+            amountPaid: totalTendered,
             changeAmount: changeAmount,
             createdAt: saleDate,
             items: {
@@ -338,12 +341,53 @@ export class SalesService {
     });
   }
 
-  async findAll(page = 1, limit = 20, cashierId?: string, status?: SaleStatus, search?: string) {
+  async findAll(
+    page = 1,
+    limit = 50,
+    cashierId?: string,
+    status?: SaleStatus,
+    search?: string,
+    cashSessionId?: string,
+    date?: string,
+    startDate?: string,
+    endDate?: string
+  ) {
     const skip = (page - 1) * limit;
     const where: any = {};
 
     if (cashierId) where.cashierId = BigInt(cashierId);
     if (status) where.status = status;
+    if (cashSessionId) where.cashSessionId = BigInt(cashSessionId);
+
+    if (date) {
+      let startOfDay: Date;
+      let endOfDay: Date;
+
+      if (date === 'today') {
+        startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999);
+      } else if (typeof date === 'string' && date.includes('-')) {
+        const parts = date.split('-').map(Number);
+        startOfDay = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+        endOfDay = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999);
+      } else {
+        const d = new Date(date);
+        startOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+        endOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+      }
+
+      where.createdAt = {
+        gte: startOfDay,
+        lte: endOfDay
+      };
+    } else if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
+    }
+
     if (search && search.trim()) {
       const q = search.trim();
       where.OR = [
@@ -353,7 +397,7 @@ export class SalesService {
       ];
     }
 
-    const [items, total] = await Promise.all([
+    const [items, total, allSalesForSummary] = await Promise.all([
       this.prisma.sale.findMany({
         where,
         skip,
@@ -362,17 +406,61 @@ export class SalesService {
           cashier: { select: { fullName: true, username: true } },
           customer: { select: { name: true, phone: true } },
           items: {
-            include: { medicine: true, batch: true }
+            include: { medicine: true, batch: true, unit: true }
           },
           payments: true
         },
         orderBy: { createdAt: 'desc' }
       }),
-      this.prisma.sale.count({ where })
+      this.prisma.sale.count({ where }),
+      this.prisma.sale.findMany({
+        where: {
+          ...where,
+          status: { not: SaleStatus.VOIDED }
+        },
+        select: {
+          grandTotal: true,
+          payments: {
+            where: { status: 'SUCCESS' },
+            select: { paymentMethod: true, amount: true }
+          }
+        }
+      })
     ]);
+
+    let totalSales = 0;
+    let cashSales = 0;
+    let creditSales = 0;
+    let bankSales = 0;
+    let storeCreditSales = 0;
+
+    for (const sale of allSalesForSummary) {
+      totalSales += Number(sale.grandTotal || 0);
+      for (const p of sale.payments) {
+        const amt = Number(p.amount || 0);
+        if (p.paymentMethod === 'CASH') {
+          cashSales += amt;
+        } else if (p.paymentMethod === 'CREDIT_CARD' || p.paymentMethod === 'DEBIT_CARD') {
+          creditSales += amt;
+        } else if (p.paymentMethod === 'BANK_TRANSFER' || p.paymentMethod === 'LANKAPAY_QR') {
+          bankSales += amt;
+        } else if (p.paymentMethod === 'STORE_CREDIT') {
+          storeCreditSales += amt;
+        }
+      }
+    }
 
     return {
       items,
+      summary: {
+        totalSales,
+        cashSales,
+        creditSales,
+        bankSales,
+        storeCreditSales,
+        totalInvoices: total,
+        activeInvoices: allSalesForSummary.length
+      },
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
     };
   }

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { SendWhatsappReminderDto } from './dto/send-reminder.dto';
 import { NotificationChannel, NotificationStatus } from '@prisma/client';
@@ -137,11 +137,11 @@ export class NotificationsService {
   async getConfig() {
     return {
       apiUrl: process.env.WHATSAPP_API_URL || 'https://graph.facebook.com/v19.0',
-      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '102938475610293',
-      wabaId: process.env.WHATSAPP_WABA_ID || '394820194820192',
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+      wabaId: process.env.WHATSAPP_WABA_ID || '',
       hasToken: Boolean(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_ACCESS_TOKEN !== 'YOUR_PERMANENT_META_SYSTEM_USER_TOKEN'),
-      webhookUrl: process.env.WHATSAPP_WEBHOOK_URL || 'https://api.pharmasys.lk/api/v1/notifications/whatsapp/webhook',
-      webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'pharma_secure_verify_2026',
+      webhookUrl: process.env.WHATSAPP_WEBHOOK_URL || '',
+      webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '',
       webhookVerified: true,
       queueStatus: 'ACTIVE',
       rateLimitPerSec: Number(process.env.WHATSAPP_RATE_LIMIT_PER_SEC) || 10,
@@ -164,9 +164,22 @@ export class NotificationsService {
   }
 
   async getTemplates() {
-    const name = process.env.PHARMACY_NAME || 'PharmaSys';
-    const phone = process.env.PHARMACY_PHONE || '+94 11 234 5678';
-    const currency = process.env.DEFAULT_CURRENCY || 'LKR';
+    let name = process.env.PHARMACY_NAME || 'PharmaSys';
+    let phone = process.env.PHARMACY_PHONE || '+94 11 234 5678';
+    let currency = process.env.DEFAULT_CURRENCY || 'LKR';
+
+    try {
+      const dbSettings = await this.prisma.pharmacySetting.findMany({
+        where: { settingKey: { in: ['PHARMACY_NAME', 'PHARMACY_PHONE', 'DEFAULT_CURRENCY'] } }
+      });
+      dbSettings.forEach((s) => {
+        if (s.settingKey === 'PHARMACY_NAME' && s.settingValue) name = s.settingValue;
+        if (s.settingKey === 'PHARMACY_PHONE' && s.settingValue) phone = s.settingValue;
+        if (s.settingKey === 'DEFAULT_CURRENCY' && s.settingValue) currency = s.settingValue;
+      });
+    } catch (e) {
+      // Fallback to process.env defaults
+    }
 
     return [
       {
@@ -335,6 +348,177 @@ export class NotificationsService {
       providerMessageId,
       status: 'SENT'
     };
+  }
+
+  /**
+   * Verify incoming Meta WhatsApp Webhook GET subscription
+   */
+  verifyWebhook(mode?: string, token?: string, challenge?: string): string {
+    const expectedToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+
+    this.logger.log(`WhatsApp Webhook GET Verification: mode="${mode}", token="${token}"`);
+
+    if (mode === 'subscribe' && token && expectedToken && token === expectedToken) {
+      this.logger.log(`WhatsApp Webhook verified successfully! Returning challenge: ${challenge}`);
+      return challenge || '';
+    }
+
+    this.logger.warn(`WhatsApp Webhook verification rejected: Token mismatch or invalid mode. Received token="${token}"`);
+    throw new ForbiddenException('Invalid verification token or mode');
+  }
+
+  /**
+   * Process incoming Meta WhatsApp Webhook POST events
+   * Handles delivery receipts, read statuses, and incoming customer replies
+   */
+  async processWhatsAppWebhook(payload: any) {
+    if (!payload || !payload.entry) {
+      this.logger.warn('Received empty or malformed WhatsApp webhook payload');
+      return { received: true };
+    }
+
+    for (const entry of payload.entry) {
+      if (!entry.changes) continue;
+
+      for (const change of entry.changes) {
+        const val = change.value;
+        if (!val) continue;
+
+        // 1. Process Delivery Status Updates (sent, delivered, read, failed)
+        if (val.statuses && Array.isArray(val.statuses)) {
+          for (const s of val.statuses) {
+            await this.handleStatusUpdate(s);
+          }
+        }
+
+        // 2. Process Incoming Customer Messages / Replies
+        if (val.messages && Array.isArray(val.messages)) {
+          for (const m of val.messages) {
+            await this.handleIncomingMessage(m, val.contacts);
+          }
+        }
+      }
+    }
+
+    return { success: true };
+  }
+
+  private async handleStatusUpdate(statusObj: any) {
+    const wamid = statusObj.id; // e.g. "wamid.HBgM..."
+    const statusStr = (statusObj.status || '').toLowerCase();
+
+    this.logger.log(`WhatsApp Status Update for ${wamid}: ${statusStr}`);
+
+    let mappedStatus: NotificationStatus | null = null;
+    if (statusStr === 'delivered') mappedStatus = NotificationStatus.DELIVERED;
+    else if (statusStr === 'read') mappedStatus = NotificationStatus.READ;
+    else if (statusStr === 'sent') mappedStatus = NotificationStatus.SENT;
+    else if (statusStr === 'failed') mappedStatus = NotificationStatus.FAILED;
+
+    if (!mappedStatus) return;
+
+    try {
+      const existing = await this.prisma.notificationLog.findFirst({
+        where: { providerMessageId: wamid }
+      });
+
+      if (existing) {
+        const errorMsg = statusObj.errors?.[0]?.message || statusObj.errors?.[0]?.title;
+        await this.prisma.notificationLog.update({
+          where: { id: existing.id },
+          data: {
+            status: mappedStatus,
+            errorMessage: errorMsg || existing.errorMessage
+          }
+        });
+      }
+    } catch (err: any) {
+      this.logger.error(`Failed to update notification status for ${wamid}: ${err.message}`);
+    }
+  }
+
+  private async handleIncomingMessage(msg: any, contacts?: any[]) {
+    const fromPhone = msg.from; // e.g. "94771234567"
+    const textBody =
+      msg.text?.body ||
+      msg.interactive?.button_reply?.title ||
+      msg.button?.text ||
+      '';
+    const wamid = msg.id;
+
+    this.logger.log(`Incoming WhatsApp message from ${fromPhone}: "${textBody}"`);
+
+    // Normalize phone numbers for search
+    const cleanPhone = fromPhone.replace(/\D/g, '');
+    const localPhone = cleanPhone.startsWith('94') ? '0' + cleanPhone.slice(2) : cleanPhone;
+    const intlPhone = cleanPhone.startsWith('94') ? '+' + cleanPhone : '+94' + cleanPhone.replace(/^0/, '');
+
+    // Find customer in database
+    const customer = await this.prisma.customer.findFirst({
+      where: {
+        OR: [
+          { phone: fromPhone },
+          { phone: cleanPhone },
+          { phone: localPhone },
+          { phone: intlPhone },
+          { whatsappNumber: fromPhone },
+          { whatsappNumber: cleanPhone },
+          { whatsappNumber: localPhone },
+          { whatsappNumber: intlPhone }
+        ]
+      }
+    });
+
+    const upperText = textBody.trim().toUpperCase();
+
+    // Check opt-out keywords (PDPA Compliance)
+    if (customer && (upperText === 'STOP' || upperText === 'UNSUBSCRIBE' || upperText === 'OPTOUT')) {
+      await this.prisma.customer.update({
+        where: { id: customer.id },
+        data: {
+          whatsappConsent: false,
+          medicineReminderConsent: false,
+          consentAt: new Date()
+        }
+      });
+      this.logger.log(`Customer ${customer.name} (${customer.phone}) opted out of WhatsApp messages.`);
+    }
+
+    // Check opt-in keywords
+    if (customer && (upperText === 'START' || upperText === 'YES' || upperText === 'OPTIN')) {
+      await this.prisma.customer.update({
+        where: { id: customer.id },
+        data: {
+          whatsappConsent: true,
+          consentAt: new Date()
+        }
+      });
+      this.logger.log(`Customer ${customer.name} (${customer.phone}) opted in to WhatsApp messages.`);
+    }
+
+    // Record incoming message in NotificationLog
+    try {
+      await this.prisma.notificationLog.create({
+        data: {
+          customerId: customer?.id || null,
+          channel: NotificationChannel.WHATSAPP,
+          recipientPhone: fromPhone,
+          templateName: 'incoming_customer_reply',
+          payload: {
+            from: fromPhone,
+            messageText: textBody,
+            type: msg.type,
+            contactName: contacts?.[0]?.profile?.name || customer?.name || 'WhatsApp Customer',
+            receivedAt: new Date().toISOString()
+          },
+          providerMessageId: wamid,
+          status: NotificationStatus.READ,
+          sentAt: new Date()
+        }
+      });
+    } catch (err: any) {
+      this.logger.error(`Failed to record incoming message log: ${err.message}`);
+    }
   }
 }
 

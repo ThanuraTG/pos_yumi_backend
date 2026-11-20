@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { PrescriptionsService } from './prescriptions.service';
-import { CreatePrescriptionDto, UpdatePrescriptionStatusDto } from './dto/create-prescription.dto';
+import { CreatePrescriptionDto, UpdatePrescriptionStatusDto, UploadPrescriptionScanDto } from './dto/create-prescription.dto';
 import { PrescriptionStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
@@ -12,7 +12,7 @@ export class PrescriptionsController {
   constructor(private readonly prescriptionsService: PrescriptionsService) {}
 
   @Get()
-  @RequirePermissions('prescriptions.intake')
+  @RequirePermissions('prescriptions.view')
   async findAll(
     @Query('search') search?: string,
     @Query('status') status?: PrescriptionStatus
@@ -21,13 +21,19 @@ export class PrescriptionsController {
   }
 
   @Get(':id')
-  @RequirePermissions('prescriptions.intake')
+  @RequirePermissions('prescriptions.view')
   async findOne(@Param('id') id: string) {
     return await this.prescriptionsService.findOne(id);
   }
 
+  @Post('upload-scan')
+  @RequirePermissions('prescriptions.view')
+  async uploadScan(@Body() dto: UploadPrescriptionScanDto) {
+    return await this.prescriptionsService.saveScanFile(dto.imageBase64, dto.filename);
+  }
+
   @Post()
-  @RequirePermissions('prescriptions.intake')
+  @RequirePermissions('prescriptions.view')
   async create(@Body() dto: CreatePrescriptionDto) {
     return await this.prescriptionsService.create(dto);
   }
@@ -47,4 +53,3 @@ export class PrescriptionsController {
     return await this.prescriptionsService.updateStatus(id, dto);
   }
 }
-

@@ -96,8 +96,8 @@ export class CreateMedicineDto {
   strength: string; // e.g. 500mg, 10mg/5ml
 
   @IsNotEmpty()
-  @IsEnum(DosageForm)
-  dosageForm: DosageForm;
+  @IsString()
+  dosageForm: string;
 
   @IsOptional()
   @IsString()

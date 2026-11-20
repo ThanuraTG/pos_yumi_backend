@@ -1,14 +1,71 @@
-import { Controller, Get, Post, Body, Query, Param, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Query,
+  Param,
+  UseGuards,
+  Req,
+  Res,
+  HttpCode,
+  HttpStatus,
+  Logger
+} from '@nestjs/common';
+import { Request, Response } from 'express';
 import { NotificationsService } from './notifications.service';
 import { SendWhatsappReminderDto } from './dto/send-reminder.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
+import { Public } from '../common/decorators/public.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('notifications')
 export class NotificationsController {
+  private readonly logger = new Logger(NotificationsController.name);
+
   constructor(private readonly notificationsService: NotificationsService) {}
+
+  /**
+   * Meta WhatsApp Webhook GET Verification
+   * Meta sends hub.mode, hub.verify_token, and hub.challenge
+   */
+  @Public()
+  @Get('whatsapp/webhook')
+  verifyWebhook(@Req() req: Request, @Res() res: Response) {
+    const mode = req.query['hub.mode'] as string;
+    const token = req.query['hub.verify_token'] as string;
+    const challenge = req.query['hub.challenge'] as string;
+
+    try {
+      const verifiedChallenge = this.notificationsService.verifyWebhook(mode, token, challenge);
+      // Meta requires HTTP 200 with raw plain text challenge
+      return res.status(HttpStatus.OK).type('text/plain').send(verifiedChallenge);
+    } catch (err: any) {
+      this.logger.warn(`WhatsApp Webhook verification failed for token: ${token}`);
+      return res.status(HttpStatus.FORBIDDEN).type('text/plain').send('Forbidden: Token mismatch');
+    }
+  }
+
+  /**
+   * Meta WhatsApp Webhook POST Event Receiver
+   * Handles delivery receipts, read statuses, and incoming replies
+   */
+  @Public()
+  @Post('whatsapp/webhook')
+  @HttpCode(HttpStatus.OK)
+  async handleWebhook(@Body() body: any, @Res() res: Response) {
+    // Immediately return 200 OK to acknowledge receipt to Meta
+    res.status(HttpStatus.OK).type('text/plain').send('EVENT_RECEIVED');
+
+    // Process event asynchronously
+    try {
+      await this.notificationsService.processWhatsAppWebhook(body);
+    } catch (err: any) {
+      this.logger.error(`Error processing WhatsApp webhook: ${err.message}`, err.stack);
+    }
+  }
 
   @Get()
   @RequirePermissions('customers.view')

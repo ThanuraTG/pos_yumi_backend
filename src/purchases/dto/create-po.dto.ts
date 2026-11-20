@@ -15,15 +15,29 @@ export class PoItemInputDto {
   @IsString()
   medicineId: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
   @Min(0.001)
-  orderedQuantity: number;
+  orderedQuantity?: number;
 
-  @IsNotEmpty()
+  @IsOptional()
+  @IsNumber()
+  @Min(0.001)
+  quantity?: number;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  estimatedUnitCost: number;
+  estimatedUnitCost?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  unitCost?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 export class CreatePurchaseOrderDto {

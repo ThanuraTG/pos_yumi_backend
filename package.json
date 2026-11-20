@@ -16,6 +16,7 @@
     "prisma:push": "prisma db push --accept-data-loss",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:mock": "ts-node prisma/mock_data.ts",
     "prisma:studio": "prisma studio",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test:medicine": "ts-node src/medicines/test-medicine-module.ts",

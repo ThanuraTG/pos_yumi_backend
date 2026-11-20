@@ -420,6 +420,8 @@ export class CustomersService {
       address?: string;
       district?: string;
       city?: string;
+      gender?: any;
+      birthday?: string;
       hasWhatsapp?: boolean;
       whatsappNumber?: string;
       whatsappConsent?: boolean;
@@ -464,6 +466,8 @@ export class CustomersService {
         address: data.address !== undefined ? data.address : customer.address,
         district: data.district !== undefined ? data.district : customer.district,
         city: data.city !== undefined ? data.city : customer.city,
+        gender: data.gender !== undefined ? (data.gender || null) : customer.gender,
+        birthday: data.birthday !== undefined ? (data.birthday ? new Date(data.birthday) : null) : customer.birthday,
         hasWhatsapp: data.hasWhatsapp !== undefined ? data.hasWhatsapp : customer.hasWhatsapp,
         whatsappNumber: finalWhatsappNumber,
         familyMemberName: data.familyMemberName !== undefined ? data.familyMemberName : customer.familyMemberName,

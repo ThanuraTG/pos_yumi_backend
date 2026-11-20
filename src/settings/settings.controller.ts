@@ -3,14 +3,20 @@ import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
+import { Public } from '../common/decorators/public.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('settings')
 export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 
+  @Get('public')
+  @Public()
+  async getPublicSettings() {
+    return await this.settingsService.getAllSettings();
+  }
+
   @Get()
-  @RequirePermissions('settings.manage')
   async getSettings() {
     return await this.settingsService.getAllSettings();
   }

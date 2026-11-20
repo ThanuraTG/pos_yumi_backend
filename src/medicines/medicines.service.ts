@@ -7,7 +7,33 @@ import {
 import { PrismaService } from '../database/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateMedicineDto } from './dto/create-medicine.dto';
-import { BatchStatus, MovementType, Prisma } from '@prisma/client';
+import { BatchStatus, DosageForm, MovementType, Prisma } from '@prisma/client';
+
+/**
+ * Normalize any input string or master dosage form name into a valid Prisma DosageForm enum
+ */
+export function normalizeDosageForm(input?: string): DosageForm {
+  if (!input) return DosageForm.OTHER;
+  const upper = input.toUpperCase().trim();
+
+  // 1. Direct Prisma DosageForm Enum match
+  if (Object.values(DosageForm).includes(upper as DosageForm)) {
+    return upper as DosageForm;
+  }
+
+  // 2. Clinical and master form keyword mappings
+  if (upper.includes('TAB')) return DosageForm.TABLET;
+  if (upper.includes('CAP')) return DosageForm.CAPSULE;
+  if (upper.includes('SYR') || upper.includes('ELIXIR') || upper.includes('LIQUID')) return DosageForm.SYRUP;
+  if (upper.includes('SUSP') || upper.includes('EMULSION')) return DosageForm.SUSPENSION;
+  if (upper.includes('INJ') || upper.includes('INFUS') || upper.includes('SYRING') || upper.includes('IV') || upper.includes('IM')) return DosageForm.INJECTION;
+  if (upper.includes('CREAM') || upper.includes('LOTION')) return DosageForm.CREAM;
+  if (upper.includes('OINT') || upper.includes('GEL') || upper.includes('PASTE') || upper.includes('JELLY')) return DosageForm.OINTMENT;
+  if (upper.includes('DROP')) return DosageForm.DROPS;
+  if (upper.includes('INHAL') || upper.includes('AEROSOL') || upper.includes('SPRAY') || upper.includes('NASAL') || upper.includes('NEBUL')) return DosageForm.INHALER;
+
+  return DosageForm.OTHER;
+}
 
 @Injectable()
 export class MedicinesService {
@@ -92,7 +118,7 @@ export class MedicinesService {
     }
 
     if (dosageForm) {
-      where.dosageForm = dosageForm as any;
+      where.dosageForm = normalizeDosageForm(dosageForm);
     }
 
     if (prescriptionType === 'RX') {
@@ -369,11 +395,12 @@ export class MedicinesService {
     }
 
     // 3. Duplicate Prevention: Check identical Brand + Strength + DosageForm
+    const normalizedDosageForm = normalizeDosageForm(dto.dosageForm);
     const duplicate = await this.prisma.medicine.findFirst({
       where: {
         brandName: dto.brandName.trim(),
         strength: dto.strength.trim(),
-        dosageForm: dto.dosageForm,
+        dosageForm: normalizedDosageForm,
         deletedAt: null
       }
     });
@@ -410,7 +437,7 @@ export class MedicinesService {
           skuCode,
           barcode: dto.barcode ? dto.barcode.trim() : null,
           strength: dto.strength.trim(),
-          dosageForm: dto.dosageForm,
+          dosageForm: normalizedDosageForm,
           composition: dto.composition || null,
           packSize: dto.packSize || null,
           baseUnit: dto.baseUnit || 'TABLET',
@@ -572,7 +599,7 @@ export class MedicinesService {
         ...(dto.brandName ? { brandName: dto.brandName.trim() } : {}),
         ...(dto.barcode !== undefined ? { barcode: dto.barcode ? dto.barcode.trim() : null } : {}),
         ...(dto.strength ? { strength: dto.strength.trim() } : {}),
-        ...(dto.dosageForm ? { dosageForm: dto.dosageForm } : {}),
+        ...(dto.dosageForm ? { dosageForm: normalizeDosageForm(dto.dosageForm) } : {}),
         ...(dto.composition !== undefined ? { composition: dto.composition || null } : {}),
         ...(dto.packSize !== undefined ? { packSize: dto.packSize || null } : {}),
         ...(dto.baseUnit ? { baseUnit: dto.baseUnit } : {}),
