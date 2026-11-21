@@ -6,7 +6,6 @@ export class SettingsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getAllSettings() {
-    const settings = await this.prisma.pharmacySetting.findMany();
     const map: Record<string, string> = {
       // 1. General & Branding
       PHARMACY_NAME: process.env.PHARMACY_NAME || 'PharmaSys Retail Pharmacy',
@@ -93,9 +92,14 @@ export class SettingsService {
       RATE_LIMIT_MAX_PER_MINUTE: process.env.THROTTLE_LIMIT || '100'
     };
 
-    settings.forEach((s) => {
-      map[s.settingKey] = s.settingValue;
-    });
+    try {
+      const settings = await this.prisma.pharmacySetting.findMany();
+      settings.forEach((s) => {
+        map[s.settingKey] = s.settingValue;
+      });
+    } catch (err: any) {
+      // Table doesn't exist yet or connection error - return default fallback map
+    }
 
     return map;
   }

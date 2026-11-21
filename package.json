@@ -11,7 +11,8 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "prisma db push --accept-data-loss && node dist/main",
+    "deploy:init": "prisma db push --accept-data-loss && prisma db seed",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push --accept-data-loss",
     "prisma:migrate": "prisma migrate dev",
@@ -44,8 +45,10 @@
     "ioredis": "^5.4.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "prisma": "^5.14.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "ts-node": "^10.9.2",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
